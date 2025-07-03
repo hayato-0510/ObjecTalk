@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "1026463907421",
+    "project_id": "objectalk-toritori-6b69f",
+    "storage_bucket": "objectalk-toritori-6b69f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1026463907421:android:3a0eb6f522d316ef3097b4",
+        "android_client_info": {
+          "package_name": "com.DefaultCompany.ObjecTalktoritori1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1026463907421-21po86rvc7lgcdom3buj3s1fp1efkags.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA0l0csVPYXNg4fHvK1yO4cdQOXA2H4BOE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1026463907421-21po86rvc7lgcdom3buj3s1fp1efkags.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
