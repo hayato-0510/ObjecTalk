@@ -5,13 +5,13 @@ using System.Collections;
 public class WebcamController : MonoBehaviour
 {
     [Header("UI要素")]
-    [SerializeField] private GameObject initialScreen;
+    // ★変更: initialPanelを削除し、formerPanelを必須要素に変更
+    [SerializeField] private GameObject formerPanel;
     [SerializeField] private GameObject cameraScreen;
     [SerializeField] private RawImage webcamDisplay;
     [SerializeField] private Button startCameraButton;
     [SerializeField] private Button backButton;
 
-    // ★追加: AspectRatioFitterをインスペクターから設定
     [Header("カメラ設定")]
     [SerializeField] private AspectRatioFitter aspectRatioFitter;
 
@@ -22,17 +22,23 @@ public class WebcamController : MonoBehaviour
         startCameraButton.onClick.AddListener(OnStartCameraButtonClick);
         backButton.onClick.AddListener(OnBackButtonClick);
 
-        initialScreen.SetActive(true);
-        cameraScreen.SetActive(false);
+        // 初期状態ではカメラ画面のみ非表示にする
+        // formerPanelは表示されていることを前提とします
+        if (cameraScreen != null)
+        {
+            cameraScreen.SetActive(false);
+        }
     }
 
     private void OnStartCameraButtonClick()
     {
+        // カメラ起動のコルーチンを開始
         StartCoroutine(StartCameraCoroutine());
     }
 
     private IEnumerator StartCameraCoroutine()
     {
+        // --- パーミッションとカメラデバイスのチェック (変更なし) ---
 #if UNITY_ANDROID || UNITY_IOS
         if (!Application.HasUserAuthorization(UserAuthorization.WebCam))
         {
@@ -52,34 +58,25 @@ public class WebcamController : MonoBehaviour
             yield break;
         }
 #endif
+        // --- ここまで ---
 
+        // --- WebCamTextureの初期化と再生 (変更なし) ---
         WebCamDevice device = WebCamTexture.devices[0];
         webCamTexture = new WebCamTexture(device.name);
         webcamDisplay.texture = webCamTexture;
         webCamTexture.Play();
 
-        // ★★★★★ 以下、アスペクト比を修正する処理を追加 ★★★★★
-
-        // カメラの準備ができるまで少し待つ
+        // --- アスペクト比を修正する処理 (変更なし) ---
         while (webCamTexture.width < 100)
         {
             yield return null;
         }
 
-        // --- アスペクト比と向きを調整 ---
-        // 1. Webカメラの回転角度に合わせてRawImageを回転させる
         webcamDisplay.rectTransform.localEulerAngles = new Vector3(0, 0, -webCamTexture.videoRotationAngle);
-
-        // 2. Webカメラの映像の縦横比を計算
         float videoAspectRatio = (float)webCamTexture.width / (float)webCamTexture.height;
-
-        // 3. AspectRatioFitterに比率を設定
         aspectRatioFitter.aspectRatio = videoAspectRatio;
-
-        // 4. インカメラの場合、映像を左右反転させる（鏡像にする）
         if (device.isFrontFacing)
         {
-            // Yスケールを-1にすると上下反転なので、Xスケールを-1にして左右反転させる
             webcamDisplay.rectTransform.localScale = new Vector3(-1, 1, 1);
         }
         else
@@ -87,12 +84,17 @@ public class WebcamController : MonoBehaviour
             webcamDisplay.rectTransform.localScale = new Vector3(1, 1, 1);
         }
 
-        // ★★★★★ ここまで ★★★★★
-
         Debug.Log("Webカメラを起動しました。");
 
-        initialScreen.SetActive(false);
-        cameraScreen.SetActive(true);
+        // ★変更: カメラ起動が成功したら、formerPanelとcameraScreenを切り替える
+        if (formerPanel != null)
+        {
+            formerPanel.SetActive(false);
+        }
+        if (cameraScreen != null)
+        {
+            cameraScreen.SetActive(true);
+        }
     }
 
     private void OnBackButtonClick()
@@ -103,8 +105,15 @@ public class WebcamController : MonoBehaviour
             Debug.Log("Webカメラを停止しました。");
         }
 
-        cameraScreen.SetActive(false);
-        initialScreen.SetActive(true);
+        // ★変更: formerPanelに戻る
+        if (cameraScreen != null)
+        {
+            cameraScreen.SetActive(false);
+        }
+        if (formerPanel != null)
+        {
+            formerPanel.SetActive(true);
+        }
     }
 
     private void OnDestroy()

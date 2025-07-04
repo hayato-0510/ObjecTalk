@@ -17155,7 +17155,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bb28b16f85ffd374986324a8ab84ead5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  initialScreen: {fileID: 3931401471898159628}
+  formerPanel: {fileID: 3931401471898159628}
+  initialScreen: {fileID: 1882365510}
   cameraScreen: {fileID: 2921744225285487542}
   webcamDisplay: {fileID: 699522241467699818}
   startCameraButton: {fileID: 1785587668}
