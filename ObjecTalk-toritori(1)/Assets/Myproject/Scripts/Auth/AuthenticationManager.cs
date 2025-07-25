@@ -1,13 +1,11 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using System.Threading.Tasks;
-using Firebase;
-using Firebase.Auth;
 using UnityEngine.SceneManagement;
 using System.Collections;
+using Firebase.Auth;
 
-public class IntegratedAuthManager : MonoBehaviour
+public class SimplifiedIntegratedAuthManager : MonoBehaviour
 {
     [Header("新規登録UI")]
     public GameObject registrationPanel;
@@ -17,7 +15,7 @@ public class IntegratedAuthManager : MonoBehaviour
     public Button registerButton;
     public TMP_Text nameHintText;
     public TMP_Text regPasswordHintText;
-    public TMP_Text registrationErrorText; // 新規登録専用エラーテキスト
+    public TMP_Text registrationErrorText;
 
     [Header("ログインUI")]
     public GameObject loginPanel;
@@ -25,7 +23,7 @@ public class IntegratedAuthManager : MonoBehaviour
     public TMP_InputField loginPasswordInputField;
     public Button loginButton;
     public Button forgotPasswordButton;
-    public TMP_Text loginErrorText; // ログイン専用エラーテキスト
+    public TMP_Text loginErrorText;
 
     [Header("共通UI")]
     public GameObject loadingPanel;
@@ -43,11 +41,8 @@ public class IntegratedAuthManager : MonoBehaviour
     public string mainMenuSceneName = "MainMenu";
 
     [Header("開発設定")]
-    public bool isDebugMode = true;
     public bool sendVerificationEmail = false;
 
-    private FirebaseAuth auth;
-    private bool isFirebaseInitialized = false;
     private bool isProcessing = false;
     private DatabaseManager databaseManager;
 
@@ -56,16 +51,25 @@ public class IntegratedAuthManager : MonoBehaviour
         databaseManager = new DatabaseManager();
         InitializeUI();
         SetupEventListeners();
-        InitializeFirebase();
+        SubscribeToAuthEvents();
+    }
+
+    private void SubscribeToAuthEvents()
+    {
+        // AuthenticationManagerのイベントに登録
+        AuthenticationManager.OnUserLoggedIn += OnUserLoggedIn;
+        AuthenticationManager.OnUserLoggedOut += OnUserLoggedOut;
+        AuthenticationManager.OnSessionExpired += OnSessionExpired;
+        AuthenticationManager.OnAuthError += OnAuthError;
     }
 
     private void InitializeUI()
     {
+        // 初期画面の設定
         if (uiManager == null)
         {
             ShowAllPanels(false);
-            if (loginPanel != null)
-                loginPanel.SetActive(true);
+            loginPanel?.SetActive(true);
         }
         else
         {
@@ -73,7 +77,7 @@ public class IntegratedAuthManager : MonoBehaviour
                 uiManager.ShowPanel(loginPanel);
         }
 
-        // 両方のエラーテキストを非表示
+        // エラーテキストとヒントテキストを初期化
         HideAllErrors();
 
         if (nameHintText != null)
@@ -81,20 +85,35 @@ public class IntegratedAuthManager : MonoBehaviour
         if (regPasswordHintText != null)
             regPasswordHintText.gameObject.SetActive(false);
 
-        if (!isDebugMode)
+        // 記憶されたメールアドレスを復元
+        RestoreRememberedEmail();
+
+        // 初期状態でボタンの状態を更新
+        UpdateAllButtons();
+    }
+
+    private void RestoreRememberedEmail()
+    {
+        if (AuthenticationManager.Instance != null)
         {
-            RestoreRememberedEmail();
+            string rememberedEmail = AuthenticationManager.Instance.GetRememberedEmail();
+            if (!string.IsNullOrEmpty(rememberedEmail) && loginEmailInputField != null)
+            {
+                loginEmailInputField.text = rememberedEmail;
+            }
         }
     }
 
     private void SetupEventListeners()
     {
+        // ボタンイベント
         switchToRegisterButton?.onClick.AddListener(OnSwitchToRegisterClicked);
         switchToLoginButton?.onClick.AddListener(OnSwitchToLoginClicked);
         registerButton?.onClick.AddListener(HandleRegisterButtonClicked);
         loginButton?.onClick.AddListener(HandleLoginButtonClicked);
         forgotPasswordButton?.onClick.AddListener(HandleForgotPasswordClicked);
 
+        // 入力フィールドイベント
         nameInputField?.onValueChanged.AddListener(OnNameChanged);
         regEmailInputField?.onValueChanged.AddListener(OnRegEmailChanged);
         regPasswordInputField?.onValueChanged.AddListener(OnRegPasswordChanged);
@@ -102,64 +121,60 @@ public class IntegratedAuthManager : MonoBehaviour
         loginPasswordInputField?.onValueChanged.AddListener(OnLoginPasswordChanged);
     }
 
-    private void RestoreRememberedEmail()
+    // ============ AuthenticationManager イベントハンドラー ============
+    private void OnUserLoggedIn(FirebaseUser user)
     {
-        if (isDebugMode) return;
-
-        string rememberedEmail = PlayerPrefs.GetString("REMEMBER_EMAIL_KEY", "");
-        if (!string.IsNullOrEmpty(rememberedEmail) && loginEmailInputField != null)
-        {
-            loginEmailInputField.text = rememberedEmail;
-        }
+        Debug.Log($"ユーザーがログインしました: {user.Email}");
+        isProcessing = false;
+        ShowLoading(false);
+        StartCoroutine(TransitionToMainMenu());
     }
 
-    async void InitializeFirebase()
+    private void OnUserLoggedOut()
     {
-        ShowLoading(true, "Firebaseを初期化中...");
+        Debug.Log("ユーザーがログアウトしました");
+        ShowAllPanels(false);
 
-        try
+        if (uiManager != null && loginPanel != null)
         {
-            var dependencyStatus = await FirebaseApp.CheckAndFixDependenciesAsync();
-            if (dependencyStatus == DependencyStatus.Available)
-            {
-                auth = FirebaseAuth.DefaultInstance;
-                isFirebaseInitialized = true;
-                auth.StateChanged += OnAuthStateChanged;
-                Debug.Log("Firebase Auth Initialized and ready!");
+            uiManager.ShowPanel(loginPanel);
+        }
+        else
+        {
+            loginPanel?.SetActive(true);
+        }
 
-                if (!isDebugMode && auth.CurrentUser != null)
-                {
-                    Debug.Log("既にログイン済みです");
-                    OnLoginSuccess();
-                    return;
-                }
-            }
-            else
-            {
-                isFirebaseInitialized = false;
-                Debug.LogError($"Could not resolve all Firebase dependencies: {dependencyStatus}");
-                ShowLoginError("Firebaseの初期化に失敗しました。");
-            }
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"Firebase初期化エラー: {e.Message}");
-            ShowLoginError("Firebase初期化エラーが発生しました。");
-        }
-        finally
-        {
-            ShowLoading(false);
-            ValidateAllInputs();
-        }
+        ClearAllInputFields();
+        HideAllErrors();
+        isProcessing = false;
+        ShowLoading(false);
     }
 
-    private void OnAuthStateChanged(object sender, System.EventArgs eventArgs)
+    private void OnSessionExpired()
     {
-        if (!isDebugMode && auth.CurrentUser != null && !isProcessing)
+        Debug.Log("セッションが期限切れです");
+        ShowLoginError("セッションが期限切れです。再度ログインしてください。");
+        isProcessing = false;
+        ShowLoading(false);
+    }
+
+    private void OnAuthError(string errorMessage)
+    {
+        Debug.LogError($"認証エラー: {errorMessage}");
+
+        // エラーメッセージを適切なテキストフィールドに表示
+        if (uiManager != null && registrationPanel != null && uiManager.IsPanelActive(registrationPanel))
         {
-            Debug.Log($"ユーザーがサインインしました: {auth.CurrentUser.Email}");
-            OnLoginSuccess();
+            ShowRegistrationError(ParseErrorMessage(errorMessage));
         }
+        else
+        {
+            ShowLoginError(ParseErrorMessage(errorMessage));
+        }
+
+        isProcessing = false;
+        ShowLoading(false);
+        UpdateAllButtons();
     }
 
     // ============ パネル切り替え処理 ============
@@ -176,6 +191,7 @@ public class IntegratedAuthManager : MonoBehaviour
             registrationPanel?.SetActive(true);
         }
         HideAllErrors();
+        UpdateAllButtons();
     }
 
     public void OnSwitchToLoginClicked()
@@ -191,6 +207,7 @@ public class IntegratedAuthManager : MonoBehaviour
             loginPanel?.SetActive(true);
         }
         HideAllErrors();
+        UpdateAllButtons();
     }
 
     // ============ 新規登録関連の処理 ============
@@ -275,25 +292,26 @@ public class IntegratedAuthManager : MonoBehaviour
         bool isEmailValid = regEmailInputField != null && !string.IsNullOrEmpty(regEmailInputField.text) &&
                            IsValidEmail(regEmailInputField.text);
         bool isPasswordValid = regPasswordInputField != null && regPasswordInputField.text.Length >= 6;
+        bool isAuthManagerReady = AuthenticationManager.Instance != null && AuthenticationManager.Instance.Auth != null;
 
-        registerButton.interactable = isNameValid && isEmailValid && isPasswordValid &&
-                                    isFirebaseInitialized && !isProcessing;
-
+        registerButton.interactable = isNameValid && isEmailValid && isPasswordValid && isAuthManagerReady && !isProcessing;
         UpdateButtonVisual(registerButton);
     }
 
     private async void HandleRegisterButtonClicked()
     {
-        if (isProcessing) return;
+        if (isProcessing || AuthenticationManager.Instance == null) return;
 
         isProcessing = true;
         ShowLoading(true, "アカウントを作成中...");
         HideRegistrationError();
+        UpdateRegisterButton();
 
         string name = nameInputField.text.Trim();
         string email = regEmailInputField.text.Trim();
         string password = regPasswordInputField.text;
 
+        // 入力値の事前検証
         if (!PreValidateRegistrationInput(name, email, password))
         {
             isProcessing = false;
@@ -305,36 +323,30 @@ public class IntegratedAuthManager : MonoBehaviour
         try
         {
             Debug.Log("Firebase認証処理を開始します...");
-            AuthResult result = await auth.CreateUserWithEmailAndPasswordAsync(email, password);
-            Debug.Log($"ユーザー登録に成功しました！ UserID: {result.User.UserId}");
+            bool success = await AuthenticationManager.Instance.RegisterAsync(email, password, name);
 
-            var profile = new UserProfile { DisplayName = name };
-            await result.User.UpdateUserProfileAsync(profile);
-
-            if (sendVerificationEmail)
+            if (success)
             {
-                await result.User.SendEmailVerificationAsync();
-                Debug.Log("確認メールを送信しました。");
+                Debug.Log($"ユーザー登録に成功しました！");
+
+                // メール認証の送信
+                if (sendVerificationEmail && AuthenticationManager.Instance.CurrentUser != null)
+                {
+                    await AuthenticationManager.Instance.CurrentUser.SendEmailVerificationAsync();
+                    Debug.Log("確認メールを送信しました。");
+                }
+
+                // データベースにユーザー情報を保存
+                SaveUserToDatabase(name, email, AuthenticationManager.Instance.CurrentUser.UserId);
+
+                Debug.Log("新規登録が完了しました。次の画面に遷移します。");
+                // 成功時の処理はOnUserLoggedInイベントで実行される
             }
-
-            SaveUserToDatabase(name, email, result.User.UserId);
-
-            if (!isDebugMode)
-            {
-                PlayerPrefs.SetString("REMEMBER_EMAIL_KEY", email);
-                PlayerPrefs.Save();
-            }
-
-            Debug.Log("新規登録が完了しました。次の画面に遷移します。");
-            OnRegistrationSuccess();
         }
         catch (System.Exception e)
         {
-            Debug.Log("Firebase認証でエラーが発生しました。");
-            HandleRegistrationError(e);
-        }
-        finally
-        {
+            Debug.LogError($"予期しないエラーが発生しました: {e.Message}");
+            ShowRegistrationError("予期しないエラーが発生しました。しばらく後でもう一度お試しください。");
             isProcessing = false;
             ShowLoading(false);
             UpdateRegisterButton();
@@ -361,19 +373,20 @@ public class IntegratedAuthManager : MonoBehaviour
         bool isEmailValid = loginEmailInputField != null && !string.IsNullOrEmpty(loginEmailInputField.text) &&
                            IsValidEmail(loginEmailInputField.text);
         bool isPasswordValid = loginPasswordInputField != null && !string.IsNullOrEmpty(loginPasswordInputField.text);
+        bool isAuthManagerReady = AuthenticationManager.Instance != null && AuthenticationManager.Instance.Auth != null;
 
-        loginButton.interactable = isEmailValid && isPasswordValid && isFirebaseInitialized && !isProcessing;
-
+        loginButton.interactable = isEmailValid && isPasswordValid && isAuthManagerReady && !isProcessing;
         UpdateButtonVisual(loginButton);
     }
 
     private async void HandleLoginButtonClicked()
     {
-        if (isProcessing) return;
+        if (isProcessing || AuthenticationManager.Instance == null) return;
 
         isProcessing = true;
         ShowLoading(true, "ログイン中...");
         HideLoginError();
+        UpdateLoginButton();
 
         string email = loginEmailInputField.text.Trim();
         string password = loginPasswordInputField.text;
@@ -389,25 +402,18 @@ public class IntegratedAuthManager : MonoBehaviour
 
         try
         {
-            AuthResult result = await auth.SignInWithEmailAndPasswordAsync(email, password);
-            Debug.Log($"ログイン成功: {result.User.Email}");
+            bool success = await AuthenticationManager.Instance.LoginAsync(email, password);
 
-            if (!isDebugMode)
+            if (success)
             {
-                PlayerPrefs.SetString("REMEMBER_EMAIL_KEY", email);
-                PlayerPrefs.Save();
+                Debug.Log($"ログイン成功: {email}");
+                // 成功時の処理はOnUserLoggedInイベントで実行される
             }
-
-            Debug.Log("ログインが完了しました。次の画面に遷移します。");
-            OnLoginSuccess();
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"ログインエラー: {e.Message}");
-            HandleLoginError(e);
-        }
-        finally
-        {
+            Debug.LogError($"予期しないエラーが発生しました: {e.Message}");
+            ShowLoginError("予期しないエラーが発生しました。しばらく後でもう一度お試しください。");
             isProcessing = false;
             ShowLoading(false);
             UpdateLoginButton();
@@ -416,6 +422,8 @@ public class IntegratedAuthManager : MonoBehaviour
 
     private async void HandleForgotPasswordClicked()
     {
+        if (AuthenticationManager.Instance == null) return;
+
         if (loginEmailInputField == null || string.IsNullOrEmpty(loginEmailInputField.text))
         {
             ShowLoginError("パスワードリセット用のメールアドレスを入力してください。");
@@ -433,12 +441,16 @@ public class IntegratedAuthManager : MonoBehaviour
 
         try
         {
-            await auth.SendPasswordResetEmailAsync(email);
-            ShowLoginSuccess("パスワードリセット用のメールを送信しました。");
+            bool success = await AuthenticationManager.Instance.SendPasswordResetEmailAsync(email);
+
+            if (success)
+            {
+                ShowLoginSuccess("パスワードリセット用のメールを送信しました。");
+            }
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"パスワードリセットエラー: {e.Message}");
+            Debug.LogError($"予期しないエラーが発生しました: {e.Message}");
             ShowLoginError("パスワードリセットメールの送信に失敗しました。");
         }
         finally
@@ -448,26 +460,16 @@ public class IntegratedAuthManager : MonoBehaviour
     }
 
     // ============ 成功時の遷移処理 ============
-    private void OnRegistrationSuccess()
-    {
-        ShowLoading(true, "新規登録完了。画面を切り替えています...");
-        StartCoroutine(TransitionToMainMenu());
-    }
-
-    private void OnLoginSuccess()
-    {
-        ShowLoading(true, "ログイン処理中...");
-        StartCoroutine(TransitionToMainMenu());
-    }
-
     private IEnumerator TransitionToMainMenu()
     {
+        ShowLoading(true, "ログイン処理完了。画面を切り替えています...");
         yield return new WaitForSeconds(1f);
 
         if (uiManager != null && panelToShowOnSuccess != null)
         {
             Debug.Log("パネル遷移を実行します。");
             uiManager.ShowPanel(panelToShowOnSuccess);
+            ShowLoading(false);
         }
         else if (!string.IsNullOrEmpty(mainMenuSceneName))
         {
@@ -477,7 +479,7 @@ public class IntegratedAuthManager : MonoBehaviour
         else
         {
             ShowLoading(false);
-            ShowRegistrationSuccess("処理が完了しました。");
+            ShowLoginSuccess("ログインが完了しました。");
         }
     }
 
@@ -565,7 +567,7 @@ public class IntegratedAuthManager : MonoBehaviour
     }
 
     // ============ 共通処理 ============
-    private void ValidateAllInputs()
+    private void UpdateAllButtons()
     {
         UpdateRegisterButton();
         UpdateLoginButton();
@@ -597,12 +599,21 @@ public class IntegratedAuthManager : MonoBehaviour
         if (regPasswordInputField != null) regPasswordInputField.text = "";
         if (loginPasswordInputField != null) loginPasswordInputField.text = "";
 
-        if (isDebugMode && loginEmailInputField != null)
-            loginEmailInputField.text = "";
+        // ログインメールアドレスは記憶されている場合があるので条件付きでクリア
+        if (loginEmailInputField != null && AuthenticationManager.Instance != null)
+        {
+            string rememberedEmail = AuthenticationManager.Instance.GetRememberedEmail();
+            if (string.IsNullOrEmpty(rememberedEmail))
+            {
+                loginEmailInputField.text = "";
+            }
+        }
     }
 
     private void UpdateButtonVisual(Button button)
     {
+        if (button == null) return;
+
         Image buttonImage = button.GetComponent<Image>();
         if (buttonImage != null)
         {
@@ -619,7 +630,7 @@ public class IntegratedAuthManager : MonoBehaviour
 
     private bool IsValidEmail(string email)
     {
-        return email.Contains("@") && email.Contains(".");
+        return !string.IsNullOrEmpty(email) && email.Contains("@") && email.Contains(".");
     }
 
     private bool PreValidateRegistrationInput(string name, string email, string password)
@@ -668,136 +679,72 @@ public class IntegratedAuthManager : MonoBehaviour
         }
     }
 
-    // HandleRegistrationError メソッドの該当部分を以下のように修正
-
-    private void HandleRegistrationError(System.Exception e)
+    private string ParseErrorMessage(string originalMessage)
     {
-        string errorMessage = "予期せぬエラーが発生しました。";
-
-        if (e.GetBaseException() is FirebaseException firebaseEx)
+        // AuthenticationManagerから受け取ったエラーメッセージを解析
+        if (originalMessage.Contains("Login failed:") || originalMessage.Contains("Registration failed:"))
         {
-            AuthError errorCode = (AuthError)firebaseEx.ErrorCode;
-            switch (errorCode)
+            // "Login failed: " や "Registration failed: " を除去
+            string[] parts = originalMessage.Split(new string[] { ": " }, 2, System.StringSplitOptions.None);
+            if (parts.Length > 1)
             {
-                case AuthError.WeakPassword:
-                    errorMessage = "パスワードが弱すぎます。6文字以上で設定してください。";
-                    break;
-                case AuthError.InvalidEmail:
-                    errorMessage = "メールアドレスの形式が正しくありません。";
-                    break;
-                case AuthError.EmailAlreadyInUse:
-                    errorMessage = "このメールアドレスは既に使用されています。";
-                    break;
-                case AuthError.MissingEmail:
-                    errorMessage = "メールアドレスを入力してください。";
-                    break;
-                default:
-                    errorMessage = "ユーザー登録に失敗しました。エラーコード: " + errorCode;
-                    break;
+                string firebaseError = parts[1];
+
+                // Firebase固有のエラーメッセージを日本語に変換
+                if (firebaseError.Contains("weak-password"))
+                    return "パスワードが弱すぎます。6文字以上で設定してください。";
+                else if (firebaseError.Contains("invalid-email"))
+                    return "メールアドレスの形式が正しくありません。";
+                else if (firebaseError.Contains("email-already-in-use"))
+                    return "このメールアドレスは既に使用されています。";
+                else if (firebaseError.Contains("wrong-password") || firebaseError.Contains("invalid-credential"))
+                    return "メールアドレスまたはパスワードが正しくありません。";
+                else if (firebaseError.Contains("user-not-found"))
+                    return "このメールアドレスのアカウントが見つかりません。";
+                else if (firebaseError.Contains("too-many-requests"))
+                    return "リクエストが多すぎます。しばらくお待ちください。";
+                else
+                    return "メールアドレス\nまたは\nパスワードが違います。";
             }
         }
 
-        if (errorMessage == "このメールアドレスは既に使用されています。")
-        {
-            ShowRegistrationError(errorMessage);
-            // 2秒後にログインパネルに遷移するコルーチンを開始
-            StartCoroutine(TransitionToLoginPanelAfterDelay(2f));
-        }
-        else
-        {
-            ShowRegistrationError(errorMessage);
-        }
+        return "予期しないエラーが発生しました。";
     }
-
-    // 新しく追加するコルーチンメソッド
-    private IEnumerator TransitionToLoginPanelAfterDelay(float delay)
-    {
-        yield return new WaitForSeconds(delay);
-
-        if (uiManager != null && loginPanel != null)
-        {
-            uiManager.ShowPanel(loginPanel);
-        }
-        else
-        {
-            ShowAllPanels(false);
-            loginPanel?.SetActive(true);
-        }
-    }
-
-    private void HandleLoginError(System.Exception e)
-    {
-        string errorMessage = "ログインに失敗しました。";
-
-        if (e.GetBaseException() is FirebaseException firebaseEx)
-        {
-            // AuthError.Failure のエラーコードは 1 です
-            AuthError errorCode = (AuthError)firebaseEx.ErrorCode;
-            switch (errorCode)
-            {
-                // Failure または InvalidCredential をキャッチ
-                case AuthError.Failure:
-                case AuthError.InvalidCredential: // 新しいSDKではこちらが返ることも
-                    errorMessage = "メールアドレス\nまたは\nパスワードが正しくありません。";
-                    break;
-
-                case AuthError.InvalidEmail:
-                    errorMessage = "メールアドレスの形式が正しくありません。";
-                    break;
-
-                case AuthError.TooManyRequests:
-                    errorMessage = "リクエストが多すぎます。しばらくお待ちください。";
-                    break;
-
-                default:
-                    errorMessage = "予期せぬエラーが発生しました。";
-                    break;
-            }
-        }
-        else
-        {
-            errorMessage = "予期せぬエラーが発生しました。";
-        }
-
-        ShowLoginError(errorMessage);
-    }
-
 
     // ============ デバッグ用メソッド ============
-    [ContextMenu("Sign Out")]
-    public void SignOut()
+    [ContextMenu("Manual Sign Out")]
+    public void ManualSignOut()
     {
-        if (auth != null)
+        if (AuthenticationManager.Instance != null)
         {
-            auth.SignOut();
-            Debug.Log("サインアウトしました");
-
-            if (uiManager != null && loginPanel != null)
-            {
-                uiManager.ShowPanel(loginPanel);
-            }
-            else
-            {
-                ShowAllPanels(false);
-                loginPanel?.SetActive(true);
-            }
-            ClearAllInputFields();
+            AuthenticationManager.Instance.SignOut();
         }
     }
 
-    [ContextMenu("Reset Login Settings")]
-    public void ResetLoginSettings()
+    [ContextMenu("Check Auth State")]
+    public void CheckAuthState()
     {
-        PlayerPrefs.DeleteKey("REMEMBER_EMAIL_KEY");
-        PlayerPrefs.Save();
-        Debug.Log("ログイン設定がリセットされました");
+        if (AuthenticationManager.Instance != null)
+        {
+            Debug.Log($"Auth State: {AuthenticationManager.Instance.CurrentLoginState}");
+            Debug.Log($"Is Logged In: {AuthenticationManager.Instance.IsLoggedIn}");
+            Debug.Log($"Current User: {AuthenticationManager.Instance.CurrentUser?.Email ?? "None"}");
+        }
+        else
+        {
+            Debug.Log("AuthenticationManager instance not found");
+        }
     }
 
     void OnDestroy()
     {
-        if (auth != null)
+        // イベント購読を解除
+        if (AuthenticationManager.Instance != null)
         {
-            auth.StateChanged -= OnAuthStateChanged;
+            AuthenticationManager.OnUserLoggedIn -= OnUserLoggedIn;
+            AuthenticationManager.OnUserLoggedOut -= OnUserLoggedOut;
+            AuthenticationManager.OnSessionExpired -= OnSessionExpired;
+            AuthenticationManager.OnAuthError -= OnAuthError;
         }
     }
 }

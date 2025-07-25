@@ -1,43 +1,108 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
+// どの設定項目を扱うトグルかを識別するためのenum（列挙型）
+public enum ToggleType
+{
+    CalendarSync,
+    WeatherSync
+}
+
 public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
 {
-    [SerializeField] Image backgroundImage;
-    [SerializeField] Color32 onColor;
-    [SerializeField] Color32 offColor;
+    // --- Inspectorで設定する項目 ---
+    [Header("トグルの種類")]
+    [SerializeField]
+    private ToggleType toggleType; // このトグルがカレンダー用か天気用かを設定
 
-    bool isOn;
+    [Header("UIコンポーネント")]
+    [SerializeField] private Image backgroundImage;
+    [SerializeField] private RectTransform handleTransform;
 
-    [SerializeField] RectTransform handleTransform;
-    [SerializeField] float handlePos;
-    [SerializeField] float moveSpeed;
+    [Header("UIデザイン")]
+    [SerializeField] private Color32 onColor = new Color32(76, 175, 80, 255);
+    [SerializeField] private Color32 offColor = new Color32(189, 189, 189, 255);
+    [SerializeField] private float handlePos = 50f;
+    [SerializeField] private float moveSpeed = 10f;
 
-    bool isMove;
+    // --- 内部変数 ---
+    private bool isOn;
+    private bool isMove;
+    private DatabaseManager dbManager;
+    private User currentUser;
 
-    public void OnPointerClick(PointerEventData eventData)
+    // 仮のユーザーID（本来はログイン機能などから取得します）
+    private const string TEMP_USER_ID = "test_user_01";
+
+    void Start()
     {
-        if (!isMove)
+        // DatabaseManagerのインスタンスを作成
+        dbManager = new DatabaseManager();
+
+        // データベースから現在のユーザー情報を取得
+        // 存在しなければ、テスト用に新しいユーザーを作成して保存
+        currentUser = dbManager.GetUser(TEMP_USER_ID);
+        if (currentUser == null)
         {
-            // ONとOFFの切り替え
-            isOn = !isOn;
-            // UIの見た目を変更
-            UpdateUI();
-            // 切り替え時の処理を実行
-            OnClick();
+            currentUser = new User
+            {
+                user_id = TEMP_USER_ID,
+                Name = "Test User",
+                Age = 30,
+                IsCalendarSyncEnabled = false, // 初期値はfalse
+                IsWeatherSyncEnabled = false   // 初期値はfalse
+            };
+            dbManager.SaveUser(currentUser);
+            Debug.Log($"テストユーザー(ID: {TEMP_USER_ID})を新規作成しました。");
+        }
+
+        // データベースの値に基づいてトグルの初期状態を設定
+        InitializeToggleState();
+
+        // UIを初期状態に（アニメーションなしで）更新
+        UpdateUI(false);
+    }
+
+    /// <summary>
+    /// データベースの値に応じてトグルの初期状態（isOn）を設定します。
+    /// </summary>
+    private void InitializeToggleState()
+    {
+        switch (toggleType)
+        {
+            case ToggleType.CalendarSync:
+                isOn = currentUser.IsCalendarSyncEnabled;
+                break;
+            case ToggleType.WeatherSync:
+                isOn = currentUser.IsWeatherSyncEnabled;
+                break;
         }
     }
 
-    // Start is called before the first frame update
-    void Start()
+    /// <summary>
+    /// クリックされた時の処理
+    /// </summary>
+    public void OnPointerClick(PointerEventData eventData)
     {
-        UpdateUI();
+        if (isMove) return;
+
+        // ON/OFF状態を反転
+        isOn = !isOn;
+
+        // UIをアニメーション付きで更新
+        UpdateUI(true);
+
+        // データベースの値を更新
+        UpdateDatabaseSetting();
     }
 
-    void UpdateUI()
+    /// <summary>
+    /// トグルの状態（見た目）を更新します。
+    /// </summary>
+    /// <param name="animated">アニメーションさせるかどうか</param>
+    private void UpdateUI(bool animated)
     {
         Vector2 endPos;
         if (isOn)
@@ -50,10 +115,22 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
             endPos = new Vector2(-handlePos, handleTransform.anchoredPosition.y);
             backgroundImage.color = offColor;
         }
-        StartCoroutine(SmoothMove(handleTransform.anchoredPosition, endPos));
+
+        // アニメーションの有無で処理を分岐
+        if (animated)
+        {
+            StartCoroutine(SmoothMove(handleTransform.anchoredPosition, endPos));
+        }
+        else
+        {
+            handleTransform.anchoredPosition = endPos;
+        }
     }
 
-    IEnumerator SmoothMove(Vector2 startPos, Vector2 endPos)
+    /// <summary>
+    /// ハンドルを滑らかに動かすコルーチン
+    /// </summary>
+    private IEnumerator SmoothMove(Vector2 startPos, Vector2 endPos)
     {
         isMove = true;
         float elapsedTime = 0;
@@ -67,16 +144,31 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
         isMove = false;
     }
 
-
-    void OnClick()
+    /// <summary>
+    /// データベースのユーザー設定を更新します。
+    /// </summary>
+    private void UpdateDatabaseSetting()
     {
-        if (isOn)
+        if (currentUser == null)
         {
-            Debug.Log("ON");
+            Debug.LogError("ユーザー情報が取得できていません。");
+            return;
         }
-        else
+
+        // トグルの種類に応じて、対応する設定を更新
+        switch (toggleType)
         {
-            Debug.Log("OFF");
+            case ToggleType.CalendarSync:
+                currentUser.IsCalendarSyncEnabled = isOn;
+                Debug.Log($"カレンダー同期設定を {isOn} に変更しました。");
+                break;
+            case ToggleType.WeatherSync:
+                currentUser.IsWeatherSyncEnabled = isOn;
+                Debug.Log($"天気同期設定を {isOn} に変更しました。");
+                break;
         }
+
+        // 変更したユーザー情報をデータベースに保存
+        dbManager.SaveUser(currentUser);
     }
 }
