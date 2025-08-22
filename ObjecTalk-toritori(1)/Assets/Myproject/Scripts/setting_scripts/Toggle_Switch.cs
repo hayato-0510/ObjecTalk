@@ -3,7 +3,6 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// どの設定項目を扱うトグルかを識別するためのenum（列挙型）
 public enum ToggleType
 {
     CalendarSync,
@@ -15,7 +14,7 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
     // --- Inspectorで設定する項目 ---
     [Header("トグルの種類")]
     [SerializeField]
-    private ToggleType toggleType; // このトグルがカレンダー用か天気用かを設定
+    private ToggleType toggleType;
 
     [Header("UIコンポーネント")]
     [SerializeField] private Image backgroundImage;
@@ -30,33 +29,37 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
     // --- 内部変数 ---
     private bool isOn;
     private bool isMove;
-    private DatabaseManager dbManager;
-    private User currentUser;
+    private DatabaseManager dbManager; // データベースマネージャーを外部から受け取る
+    private User currentUser;         // ユーザー情報を外部から受け取る
 
-    // 仮のユーザーID（本来はログイン機能などから取得します）
-    private const string TEMP_USER_ID = "test_user_01";
-
-    void Start()
+    /// <summary>
+    /// このトグルを初期化し、ユーザー情報とDBマネージャーを設定します。
+    /// ログイン成功後、IntegratedAuthManagerから呼び出されます。
+    /// </summary>
+    public void Initialize(User user, DatabaseManager databaseManager)
     {
-        // DatabaseManagerのインスタンスを作成
-        dbManager = new DatabaseManager();
-
-        // データベースから現在のユーザー情報を取得
-        // 存在しなければ、テスト用に新しいユーザーを作成して保存
-        currentUser = dbManager.GetUser(TEMP_USER_ID);
-        if (currentUser == null)
+        Debug.Log("ToggleSwitchが初期化されました。"); // この行を追加
+        if (user == null)
         {
-            currentUser = new User
+            if (user == null)
             {
-                user_id = TEMP_USER_ID,
-                Name = "Test User",
-                Age = 30,
-                IsCalendarSyncEnabled = false, // 初期値はfalse
-                IsWeatherSyncEnabled = false   // 初期値はfalse
-            };
-            dbManager.SaveUser(currentUser);
-            Debug.Log($"テストユーザー(ID: {TEMP_USER_ID})を新規作成しました。");
+                Debug.LogError("ユーザー情報が渡されていません。トグルを無効化します。");
+
+                // ① まずコンポーネントを取得
+                var selectable = GetComponent<Selectable>();
+
+                // ② コンポーネントが存在するかチェックしてから、プロパティに代入
+                if (selectable != null)
+                {
+                    selectable.interactable = false;
+                }
+
+                return;
+            }
         }
+
+        currentUser = user;
+        dbManager = databaseManager;
 
         // データベースの値に基づいてトグルの初期状態を設定
         InitializeToggleState();
@@ -81,6 +84,8 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
         }
     }
 
+    // ... (以下、既存のOnPointerClick, UpdateUI, SmoothMove, UpdateDatabaseSettingメソッドは変更なし)
+
     /// <summary>
     /// クリックされた時の処理
     /// </summary>
@@ -98,10 +103,6 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
         UpdateDatabaseSetting();
     }
 
-    /// <summary>
-    /// トグルの状態（見た目）を更新します。
-    /// </summary>
-    /// <param name="animated">アニメーションさせるかどうか</param>
     private void UpdateUI(bool animated)
     {
         Vector2 endPos;
@@ -116,7 +117,6 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
             backgroundImage.color = offColor;
         }
 
-        // アニメーションの有無で処理を分岐
         if (animated)
         {
             StartCoroutine(SmoothMove(handleTransform.anchoredPosition, endPos));
@@ -127,9 +127,6 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
         }
     }
 
-    /// <summary>
-    /// ハンドルを滑らかに動かすコルーチン
-    /// </summary>
     private IEnumerator SmoothMove(Vector2 startPos, Vector2 endPos)
     {
         isMove = true;
@@ -144,18 +141,14 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
         isMove = false;
     }
 
-    /// <summary>
-    /// データベースのユーザー設定を更新します。
-    /// </summary>
     private void UpdateDatabaseSetting()
     {
-        if (currentUser == null)
+        if (currentUser == null || dbManager == null)
         {
-            Debug.LogError("ユーザー情報が取得できていません。");
+            Debug.LogError("ユーザー情報またはDBマネージャーが設定されていません。");
             return;
         }
 
-        // トグルの種類に応じて、対応する設定を更新
         switch (toggleType)
         {
             case ToggleType.CalendarSync:
@@ -168,7 +161,6 @@ public class ToggleSwitch : MonoBehaviour, IPointerClickHandler
                 break;
         }
 
-        // 変更したユーザー情報をデータベースに保存
         dbManager.SaveUser(currentUser);
     }
 }

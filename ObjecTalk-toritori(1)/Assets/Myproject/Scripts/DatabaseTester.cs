@@ -50,11 +50,6 @@ public class DatabaseDebugger : MonoBehaviour
             showObjectsWithFeaturesButton.onClick.AddListener(ShowObjectsWithFeatures);
         }
 
-        if (insertTestDataButton != null)
-        {
-            insertTestDataButton.onClick.AddListener(InsertTestData);
-        }
-
         if (backToLoginButton != null)
         {
             backToLoginButton.onClick.AddListener(BackToLogin);
@@ -280,60 +275,6 @@ public class DatabaseDebugger : MonoBehaviour
             string errorOutput = $"データベースクリア中にエラーが発生しました:\n{e.Message}";
             UpdateDebugText(errorOutput);
             Debug.LogError($"データベースクリアエラー: {e}");
-        }
-    }
-
-    /// <summary>
-    /// ★新規追加：テストデータを挿入する
-    /// </summary>
-    [ContextMenu("テストデータ挿入")]
-    public void InsertTestData()
-    {
-        try
-        {
-            string output = "=== テストデータ挿入中... ===\n\n";
-
-            // テストユーザーを作成
-            var testUser = new User
-            {
-                user_id = "test_user_001",
-                Name = "テストユーザー",
-                Age = 25,
-                GmailAddress = "test@example.com",
-                IsCalendarSyncEnabled = true,
-                IsWeatherSyncEnabled = false
-            };
-
-            databaseManager.SaveUser(testUser);
-            output += "テストユーザーを作成しました。\n";
-
-            // テストオブジェクトを作成
-            var testObject = new ObjectItem
-            {
-                object_id = "test_object_001",
-                user_id = testUser.user_id,
-                Name = "テストペン",
-                Category = "文房具",
-                AiDescription = "青いボールペンです。滑らかに書けます。",
-                ImageURL = "https://example.com/pen.jpg"
-            };
-
-            // 特徴タグと一緒に保存
-            var featureTags = new List<string> { "青色", "ボールペン", "文房具", "書きやすい" };
-            databaseManager.SaveObjectWithFeatures(testObject, featureTags);
-
-            output += "テストオブジェクトと特徴タグを作成しました。\n";
-            output += $"最終統計: {databaseManager.GetDatabaseStats()}\n";
-            output += "\n=== テストデータ挿入完了 ===";
-
-            UpdateDebugText(output);
-            Debug.Log("テストデータの挿入完了");
-        }
-        catch (System.Exception e)
-        {
-            string errorOutput = $"テストデータ挿入中にエラーが発生しました:\n{e.Message}\n\nスタックトレース:\n{e.StackTrace}";
-            UpdateDebugText(errorOutput);
-            Debug.LogError($"テストデータ挿入エラー: {e}");
         }
     }
 

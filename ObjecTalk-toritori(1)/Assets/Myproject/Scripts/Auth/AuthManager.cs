@@ -71,7 +71,6 @@ public class AuthenticationManager : MonoBehaviour
 
                 Debug.Log("AuthenticationManager: Firebase Auth‰Šú‰»Š®—¹");
 
-                await RestoreLoginState();
                 isInitialized = true;
 
                 if (maintainLoginState)
@@ -217,7 +216,7 @@ public class AuthenticationManager : MonoBehaviour
     }
 
     // ƒƒOƒCƒ“ó‘Ô‚Ì•œŒ³
-    private async Task RestoreLoginState()
+    private void RestoreLoginState()
     {
         if (!maintainLoginState)
         {
