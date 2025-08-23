@@ -154,14 +154,29 @@ public class IntegratedAuthManager : MonoBehaviour
 
         if (loggedInUser != null)
         {
-            // ★ 修正点: 非アクティブなGameObjectも含むように検索 ★
+            // ------------------------------------------------------------------
+            // ★修正点: シーン内のすべての初期化対象コンポーネントを見つけてループする ★
+            // ------------------------------------------------------------------
+
+            // ToggleSwitchを初期化
             ToggleSwitch[] toggleSwitches = FindObjectsByType<ToggleSwitch>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-
-            Debug.Log($"シーン全体で見つかったToggleSwitchの数: {toggleSwitches.Length}");
-
             foreach (ToggleSwitch toggle in toggleSwitches)
             {
                 toggle.Initialize(loggedInUser, databaseManager);
+            }
+
+            // AppSettingsUIControllerを初期化
+            AppSettingsUIController[] settingsControllers = FindObjectsByType<AppSettingsUIController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (AppSettingsUIController controller in settingsControllers)
+            {
+                controller.Initialize(loggedInUser, databaseManager);
+            }
+
+            // ★新規追加: ProfileEditorを初期化
+            ProfileEditor[] profileEditors = FindObjectsByType<ProfileEditor>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (ProfileEditor editor in profileEditors)
+            {
+                editor.Initialize(loggedInUser, databaseManager);
             }
         }
         else
@@ -261,7 +276,7 @@ public class IntegratedAuthManager : MonoBehaviour
             {
                 user_id = firebaseUserId,
                 Name = name,
-                Age = 0,
+                DateOfBirth = "", // 登録時は空文字列としておく
                 GmailAddress = email,
                 IsCalendarSyncEnabled = false,
                 IsWeatherSyncEnabled = false

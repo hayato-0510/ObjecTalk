@@ -14,8 +14,8 @@ public class User
     [Column("name")]
     public string Name { get; set; }
 
-    [Column("age")]
-    public int Age { get; set; }
+    [Column("date_of_birth")]
+    public string DateOfBirth { get; set; }
 
     [Column("gmail_address")]
     public string GmailAddress { get; set; }

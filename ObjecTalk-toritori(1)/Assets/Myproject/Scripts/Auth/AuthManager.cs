@@ -69,7 +69,23 @@ public class AuthenticationManager : MonoBehaviour
                 Auth = FirebaseAuth.DefaultInstance;
                 Auth.StateChanged += OnAuthStateChanged;
 
+                // ★★★ 最終修正：Firebaseのセッション復元を即座に上書きするロジック ★★★
+                if (!maintainLoginState && Auth.CurrentUser != null)
+                {
+                    Debug.Log("最終修正: 自動ログインが無効なため、Firebaseセッションを強制的にクリアします。");
+                    Auth.SignOut();
+                    ClearLoginState(); // PlayerPrefsも確実にクリア
+                }
+
                 Debug.Log("AuthenticationManager: Firebase Auth初期化完了");
+
+                await RestoreLoginState();
+
+                isInitialized = true;
+
+                Debug.Log("AuthenticationManager: Firebase Auth初期化完了");
+
+                await RestoreLoginState();
 
                 isInitialized = true;
 
@@ -97,6 +113,14 @@ public class AuthenticationManager : MonoBehaviour
 
     private void OnAuthStateChanged(object sender, EventArgs eventArgs)
     {
+        // アプリ初期化時かつ自動ログインが無効な場合、復元されたセッションを強制的にログアウト
+        if (currentLoginState == LoginState.Initializing && !maintainLoginState && Auth.CurrentUser != null)
+        {
+            Debug.Log("自動ログインが無効なため、既存のセッションをクリアします。");
+            SignOut();
+            return;
+        }
+
         if (Auth.CurrentUser != null)
         {
             Debug.Log($"User signed in: {Auth.CurrentUser.Email}");
@@ -216,13 +240,13 @@ public class AuthenticationManager : MonoBehaviour
     }
 
     // ログイン状態の復元
-    private void RestoreLoginState()
+    private Task RestoreLoginState()
     {
         if (!maintainLoginState)
         {
             currentLoginState = LoginState.NotLoggedIn;
             Debug.Log("ログイン状態の維持が無効です");
-            return;
+            return Task.CompletedTask; // asyncを外すため、return Task.CompletedTask; に変更
         }
 
         if (IsSessionExpired())
@@ -231,7 +255,7 @@ public class AuthenticationManager : MonoBehaviour
             ClearLoginState();
             OnSessionExpired?.Invoke();
             Debug.Log("セッションが期限切れです");
-            return;
+            return Task.CompletedTask; // asyncを外すため、return Task.CompletedTask; に変更
         }
 
         if (Auth.CurrentUser != null)
@@ -243,7 +267,7 @@ public class AuthenticationManager : MonoBehaviour
                 UpdateLastLoginTime();
                 OnUserLoggedIn?.Invoke(Auth.CurrentUser);
                 Debug.Log($"ログイン状態を復元しました: {Auth.CurrentUser.Email}");
-                return;
+                return Task.CompletedTask; // asyncを外すため、return Task.CompletedTask; に変更
             }
         }
 
@@ -258,11 +282,20 @@ public class AuthenticationManager : MonoBehaviour
             currentLoginState = LoginState.NotLoggedIn;
             Debug.Log("ログインしていません");
         }
+
+        // メソッドの最後にCompletedTaskを返す
+        return Task.CompletedTask;
     }
 
     private void SaveLoginState(string userId, string email)
     {
-        if (!maintainLoginState) return;
+        // ★ 修正点: maintainLoginStateがtrueの場合のみ保存
+        if (!maintainLoginState)
+        {
+            // 自動ログインが無効な場合は、セッションを保存せずにクリア
+            ClearLoginState();
+            return;
+        }
 
         PlayerPrefs.SetInt(LOGIN_STATE_KEY, (int)LoginState.LoggedIn);
         PlayerPrefs.SetString(USER_ID_KEY, userId);

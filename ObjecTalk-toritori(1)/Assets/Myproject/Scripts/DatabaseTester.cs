@@ -219,9 +219,8 @@ public class DatabaseDebugger : MonoBehaviour
                     output += $"--- ユーザー {i + 1} ---\n";
                     output += $"ID: {user.user_id}\n";
                     output += $"名前: '{user.Name}'\n";
-                    output += $"年齢: {user.Age}\n";
+                    output += $"生年月日: {user.DateOfBirth}\n";
                     output += $"メールアドレス: '{user.GmailAddress}'\n";
-                    // ★変更：新しい設定項目を表示
                     output += $"カレンダー連携: {(user.IsCalendarSyncEnabled ? "有効" : "無効")}\n";
                     output += $"天気連携: {(user.IsWeatherSyncEnabled ? "有効" : "無効")}\n";
                     output += "\n";
