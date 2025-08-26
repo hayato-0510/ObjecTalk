@@ -17,39 +17,41 @@ public class DatabaseDebugger : MonoBehaviour
     public TMP_Text debugOutputText;
     public ScrollRect scrollRect;
 
+    [Header("Panel References")]
+    public GameObject homePanel;
+    public GameObject debugPanel;
+
     private DatabaseManager databaseManager;
 
     void Start()
     {
         databaseManager = new DatabaseManager();
 
-        // ボタンにリスナーを登録
+        // ... (ボタンのリスナー登録はそのまま)
         if (checkDatabaseButton != null)
         {
             checkDatabaseButton.onClick.AddListener(CheckDatabase);
         }
-
         if (clearDatabaseButton != null)
         {
             clearDatabaseButton.onClick.AddListener(ClearDatabase);
         }
-
         if (showEmailsButton != null)
         {
             showEmailsButton.onClick.AddListener(ShowAllEmailAddresses);
         }
-
-        // ★新規追加：新しいボタンのリスナー登録
         if (showFeaturesButton != null)
         {
             showFeaturesButton.onClick.AddListener(ShowAllFeatures);
         }
-
         if (showObjectsWithFeaturesButton != null)
         {
             showObjectsWithFeaturesButton.onClick.AddListener(ShowObjectsWithFeatures);
         }
-
+        if (insertTestDataButton != null)
+        {
+            // insertTestDataButton.onClick.AddListener(InsertTestData); // テストデータ挿入ボタンのリスナー
+        }
         if (backToLoginButton != null)
         {
             backToLoginButton.onClick.AddListener(BackToLogin);
@@ -277,23 +279,29 @@ public class DatabaseDebugger : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// ★新規追加：ログイン画面に戻る
+    //// <summary>
+    /// ★修正：ログイン画面のパネルに戻る
     /// </summary>
     [ContextMenu("ログイン画面に戻る")]
     public void BackToLogin()
     {
         try
         {
-            // シーン遷移を実行
-            UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene");
-            Debug.Log("ログイン画面に遷移します");
+            if (homePanel != null)
+            {
+                homePanel.SetActive(true);
+            }
+            if (debugPanel != null)
+            {
+                debugPanel.SetActive(false);
+            }
+            Debug.Log("ホームパネルに戻りました。");
         }
         catch (System.Exception e)
         {
-            string errorOutput = $"ログイン画面への遷移中にエラーが発生しました:\n{e.Message}";
+            string errorOutput = $"パネル遷移中にエラーが発生しました:\n{e.Message}";
             UpdateDebugText(errorOutput);
-            Debug.LogError($"画面遷移エラー: {e}");
+            Debug.LogError($"パネル遷移エラー: {e}");
         }
     }
 
