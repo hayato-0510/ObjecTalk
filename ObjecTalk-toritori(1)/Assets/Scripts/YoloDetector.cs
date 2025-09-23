@@ -24,12 +24,17 @@ public class RealtimeYoloDetector : MonoBehaviour
     [SerializeField] private AspectRatioFitter fit;
     [SerializeField] private GameObject boxPrefab;
 
+    [Header("Debug Settings")]
+    [SerializeField] private bool enableConsoleOutput = true;
+    [SerializeField] private bool showDetailedInfo = true;
+
     // --- Private members ---
     private string[] labels;
     private Worker engine;
     private WebCamTexture cameraTexture;
     private bool isDetecting = false;
     private bool isInitialized = false;
+    private int frameCount = 0;
 
     void Start()
     {
@@ -174,6 +179,7 @@ public class RealtimeYoloDetector : MonoBehaviour
     IEnumerator RunDetection()
     {
         isDetecting = true;
+        frameCount++;
 
         Tensor<float> inputTensor = null;
         Tensor<float> outputBoxes = null;
@@ -226,6 +232,13 @@ public class RealtimeYoloDetector : MonoBehaviour
                     outputLabels = rawOutputLabels.ReadbackAndClone();
 
                     var detectionResults = ProcessDetections(outputBoxes, outputScores, outputLabels);
+
+                    // コンソール出力を追加
+                    if (enableConsoleOutput)
+                    {
+                        LogDetectionResults(detectionResults);
+                    }
+
                     DrawBoundingBoxes(detectionResults);
                 }
             }
@@ -250,6 +263,59 @@ public class RealtimeYoloDetector : MonoBehaviour
         }
 
         isDetecting = false;
+    }
+
+    // 検出結果をコンソールに出力する新しいメソッド
+    void LogDetectionResults(List<BoundingBox> detectionResults)
+    {
+        if (detectionResults.Count == 0)
+        {
+            // 何も検出されなかった場合は出力しない（スパム防止）
+            return;
+        }
+
+        System.Text.StringBuilder logMessage = new System.Text.StringBuilder();
+        logMessage.AppendLine($"=== Frame {frameCount} - 検出された物体: {detectionResults.Count}個 ===");
+
+        // 物体の種類をカウント
+        Dictionary<string, int> objectCounts = new Dictionary<string, int>();
+        Dictionary<string, float> maxScores = new Dictionary<string, float>();
+
+        foreach (var detection in detectionResults)
+        {
+            // カウント
+            if (objectCounts.ContainsKey(detection.Label))
+            {
+                objectCounts[detection.Label]++;
+            }
+            else
+            {
+                objectCounts[detection.Label] = 1;
+            }
+
+            // 最高スコアを記録
+            if (!maxScores.ContainsKey(detection.Label) || detection.Score > maxScores[detection.Label])
+            {
+                maxScores[detection.Label] = detection.Score;
+            }
+
+            // 詳細情報を表示する場合
+            if (showDetailedInfo)
+            {
+                logMessage.AppendLine($"  ? {detection.Label}: {detection.Score:P1} " +
+                                    $"(位置: {detection.CenterX:F0}, {detection.CenterY:F0}, " +
+                                    $"サイズ: {detection.Width:F0}×{detection.Height:F0})");
+            }
+        }
+
+        // サマリー情報
+        logMessage.AppendLine("--- 検出サマリー ---");
+        foreach (var kvp in objectCounts)
+        {
+            logMessage.AppendLine($"  {kvp.Key}: {kvp.Value}個 (最高信頼度: {maxScores[kvp.Key]:P1})");
+        }
+
+        Debug.Log(logMessage.ToString());
     }
 
     // TextureConverter.ToTensorの代替実装
@@ -311,7 +377,6 @@ public class RealtimeYoloDetector : MonoBehaviour
         float offsetY = rawImage.rectTransform.rect.height / 2;
 
         int count = outputBoxes.shape[0];
-        Debug.Log($"Detection count: {count}");
 
         for (int i = 0; i < count; i++)
         {
@@ -368,8 +433,6 @@ public class RealtimeYoloDetector : MonoBehaviour
                 Debug.LogError("BoxPrefab is null!");
                 return;
             }
-
-            Debug.Log($"Drawing {boxes.Count} bounding boxes");
 
             // 既存のボックスを削除
             foreach (Transform child in rawImage.transform)
