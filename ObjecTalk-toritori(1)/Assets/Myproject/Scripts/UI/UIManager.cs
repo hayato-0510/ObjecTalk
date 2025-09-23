@@ -15,6 +15,23 @@ public class FlexibleUIManager : MonoBehaviour
 
     void Start()
     {
+        if (!string.IsNullOrEmpty(SceneTransitionData.TargetPanelName))
+        {
+            // 名前でパネルをリストから検索
+            GameObject panelToShow = allPanels.Find(p => p.name == SceneTransitionData.TargetPanelName);
+            if (panelToShow != null)
+            {
+                ShowPanel(panelToShow);
+                // 情報を使い終わったので、運び屋のメモを空にする
+                SceneTransitionData.TargetPanelName = null;
+                return; // ここで初期化処理を終了
+            }
+            else
+            {
+                Debug.LogWarning($"指定されたパネル '{SceneTransitionData.TargetPanelName}' が見つかりません");
+                SceneTransitionData.TargetPanelName = null; // 見つからなかったのでクリア
+            }
+        }
         // 念のため、全てのパネルを一度非表示にする
         foreach (GameObject panel in allPanels)
         {

@@ -1,0 +1,585 @@
+fileFormatVersion: 2
+guid: ee5d5e70f9ba1894cbba61feec8da575
+TextureImporter:
+  internalIDToNameTable:
+  - first:
+      213: -1512774250373426239
+    second: hand-drawn-teeth-smile-cartoon-illustration_0
+  - first:
+      213: 3040225206530392578
+    second: hand-drawn-teeth-smile-cartoon-illustration_1
+  - first:
+      213: 198717547580874927
+    second: hand-drawn-teeth-smile-cartoon-illustration_2
+  - first:
+      213: 3575102583138379242
+    second: hand-drawn-teeth-smile-cartoon-illustration_3
+  - first:
+      213: 5877638993324983626
+    second: hand-drawn-teeth-smile-cartoon-illustration_4
+  - first:
+      213: 6550348421885981065
+    second: hand-drawn-teeth-smile-cartoon-illustration_5
+  - first:
+      213: -4914848941857450493
+    second: hand-drawn-teeth-smile-cartoon-illustration_6
+  - first:
+      213: 8724783656184044818
+    second: hand-drawn-teeth-smile-cartoon-illustration_7
+  - first:
+      213: 675798082213922939
+    second: hand-drawn-teeth-smile-cartoon-illustration_8
+  - first:
+      213: -7420650331601241608
+    second: hand-drawn-teeth-smile-cartoon-illustration_9
+  - first:
+      213: -1056690602944961257
+    second: hand-drawn-teeth-smile-cartoon-illustration_10
+  - first:
+      213: -6098314321213615901
+    second: hand-drawn-teeth-smile-cartoon-illustration_11
+  - first:
+      213: -8121638939570811746
+    second: hand-drawn-teeth-smile-cartoon-illustration_12
+  - first:
+      213: -4526779362648125863
+    second: hand-drawn-teeth-smile-cartoon-illustration_13
+  - first:
+      213: 2080276138676435880
+    second: hand-drawn-teeth-smile-cartoon-illustration_14
+  - first:
+      213: 6514830729629712662
+    second: hand-drawn-teeth-smile-cartoon-illustration_15
+  - first:
+      213: -4340626945290369303
+    second: hand-drawn-teeth-smile-cartoon-illustration_16
+  externalObjects: {}
+  serializedVersion: 13
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 0
+    sRGBTexture: 1
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+    flipGreenChannel: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  vTOnly: 0
+  ignoreMipmapLimit: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: 2048
+  textureSettings:
+    serializedVersion: 2
+    filterMode: 1
+    aniso: 1
+    mipBias: 0
+    wrapU: 1
+    wrapV: 1
+    wrapW: 1
+  nPOTScale: 0
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 2
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {x: 0.5, y: 0.5}
+  spritePixelsToUnits: 100
+  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 1
+  spriteTessellationDetail: -1
+  textureType: 8
+  textureShape: 1
+  singleChannelComponent: 0
+  flipbookRows: 1
+  flipbookColumns: 1
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  ignorePngGamma: 0
+  applyGammaDecoding: 0
+  swizzle: 50462976
+  cookieLightType: 0
+  platformSettings:
+  - serializedVersion: 4
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Standalone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Android
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: iOS
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  spriteSheet:
+    serializedVersion: 2
+    sprites:
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_0
+      rect:
+        serializedVersion: 2
+        x: 233
+        y: 1459
+        width: 592
+        height: 387
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 1c3522595db810be0800000000000000
+      internalID: -1512774250373426239
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_1
+      rect:
+        serializedVersion: 2
+        x: 1108
+        y: 1513
+        width: 659
+        height: 298
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 202ce60b7bc013a20800000000000000
+      internalID: 3040225206530392578
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_2
+      rect:
+        serializedVersion: 2
+        x: 1277
+        y: 1451
+        width: 207
+        height: 62
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: fa0e1328e8cf1c200800000000000000
+      internalID: 198717547580874927
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_3
+      rect:
+        serializedVersion: 2
+        x: 475
+        y: 1401
+        width: 127
+        height: 61
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: ae56b8f8bd05d9130800000000000000
+      internalID: 3575102583138379242
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_4
+      rect:
+        serializedVersion: 2
+        x: 238
+        y: 965
+        width: 613
+        height: 339
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: a45ce1bf581919150800000000000000
+      internalID: 5877638993324983626
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_5
+      rect:
+        serializedVersion: 2
+        x: 1366
+        y: 1290
+        width: 209
+        height: 52
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 981fd893f2387ea50800000000000000
+      internalID: 6550348421885981065
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_6
+      rect:
+        serializedVersion: 2
+        x: 1080
+        y: 993
+        width: 668
+        height: 292
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 306d1e76de2facbb0800000000000000
+      internalID: -4914848941857450493
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_7
+      rect:
+        serializedVersion: 2
+        x: 1512
+        y: 973
+        width: 133
+        height: 77
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 21ddbf86288a41970800000000000000
+      internalID: 8724783656184044818
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_8
+      rect:
+        serializedVersion: 2
+        x: 468
+        y: 921
+        width: 147
+        height: 36
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: b78404676cae06900800000000000000
+      internalID: 675798082213922939
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_9
+      rect:
+        serializedVersion: 2
+        x: 1152
+        y: 555
+        width: 588
+        height: 398
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 8f9f586f6dd840990800000000000000
+      internalID: -7420650331601241608
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_10
+      rect:
+        serializedVersion: 2
+        x: 265
+        y: 589
+        width: 600
+        height: 262
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 715e8f5ce71e551f0800000000000000
+      internalID: -1056690602944961257
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_11
+      rect:
+        serializedVersion: 2
+        x: 612
+        y: 562
+        width: 147
+        height: 26
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 3e092636f6f6e5ba0800000000000000
+      internalID: -6098314321213615901
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_12
+      rect:
+        serializedVersion: 2
+        x: 272
+        y: 186
+        width: 617
+        height: 229
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: e9cc6ec2a642a4f80800000000000000
+      internalID: -8121638939570811746
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_13
+      rect:
+        serializedVersion: 2
+        x: 1106
+        y: 217
+        width: 637
+        height: 219
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 95e0ac05726ad21c0800000000000000
+      internalID: -4526779362648125863
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_14
+      rect:
+        serializedVersion: 2
+        x: 528
+        y: 180
+        width: 154
+        height: 31
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 8abb7885020aedc10800000000000000
+      internalID: 2080276138676435880
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_15
+      rect:
+        serializedVersion: 2
+        x: 549
+        y: 175
+        width: 88
+        height: 14
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 611c0631804596a50800000000000000
+      internalID: 6514830729629712662
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: hand-drawn-teeth-smile-cartoon-illustration_16
+      rect:
+        serializedVersion: 2
+        x: 1337
+        y: 153
+        width: 158
+        height: 47
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 9e68a777acef2c3c0800000000000000
+      internalID: -4340626945290369303
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    outline: []
+    customData: 
+    physicsShape: []
+    bones: []
+    spriteID: 
+    internalID: 0
+    vertices: []
+    indices: 
+    edges: []
+    weights: []
+    secondaryTextures: []
+    spriteCustomMetadata:
+      entries: []
+    nameFileIdTable:
+      hand-drawn-teeth-smile-cartoon-illustration_0: -1512774250373426239
+      hand-drawn-teeth-smile-cartoon-illustration_1: 3040225206530392578
+      hand-drawn-teeth-smile-cartoon-illustration_10: -1056690602944961257
+      hand-drawn-teeth-smile-cartoon-illustration_11: -6098314321213615901
+      hand-drawn-teeth-smile-cartoon-illustration_12: -8121638939570811746
+      hand-drawn-teeth-smile-cartoon-illustration_13: -4526779362648125863
+      hand-drawn-teeth-smile-cartoon-illustration_14: 2080276138676435880
+      hand-drawn-teeth-smile-cartoon-illustration_15: 6514830729629712662
+      hand-drawn-teeth-smile-cartoon-illustration_16: -4340626945290369303
+      hand-drawn-teeth-smile-cartoon-illustration_2: 198717547580874927
+      hand-drawn-teeth-smile-cartoon-illustration_3: 3575102583138379242
+      hand-drawn-teeth-smile-cartoon-illustration_4: 5877638993324983626
+      hand-drawn-teeth-smile-cartoon-illustration_5: 6550348421885981065
+      hand-drawn-teeth-smile-cartoon-illustration_6: -4914848941857450493
+      hand-drawn-teeth-smile-cartoon-illustration_7: 8724783656184044818
+      hand-drawn-teeth-smile-cartoon-illustration_8: 675798082213922939
+      hand-drawn-teeth-smile-cartoon-illustration_9: -7420650331601241608
+  mipmapLimitGroupName: 
+  pSDRemoveMatte: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
