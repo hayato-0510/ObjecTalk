@@ -309,7 +309,7 @@ MonoBehaviour:
   m_margin: {x: 0, y: 0, z: 0, w: 0}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 1
+  m_hasFontAssetChanged: 0
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
 --- !u!222 &17152153
@@ -1657,7 +1657,7 @@ MonoBehaviour:
   m_margin: {x: 0, y: 0, z: 0, w: 0}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 1
+  m_hasFontAssetChanged: 0
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
 --- !u!222 &322821349
@@ -4833,7 +4833,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5dc03191f81efad4cbc35d6fcf98ce67, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maintainLoginState: 1
+  maintainLoginState: 0
   sessionTimeoutMinutes: 1
 --- !u!1 &792068647
 GameObject:
@@ -5148,7 +5148,7 @@ MonoBehaviour:
   m_margin: {x: 0, y: 0, z: 0, w: 0}
   m_isUsingLegacyAnimationComponent: 0
   m_isVolumetricText: 0
-  m_hasFontAssetChanged: 1
+  m_hasFontAssetChanged: 0
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
 --- !u!222 &797233357
@@ -5206,6 +5206,7 @@ MonoBehaviour:
   loginUIHandler: {fileID: 1882365515}
   registrationUIHandler: {fileID: 9106605560621051632}
   uiManager: {fileID: 1504754974}
+  profileEditor: {fileID: 1431520636}
   loadingPanel: {fileID: 0}
   loadingText: {fileID: 0}
   panelToShowOnSuccess: {fileID: 219286577043567326}
