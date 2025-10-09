@@ -62,6 +62,12 @@ public class IntegratedAuthManager : MonoBehaviour
     /// </summary>
     public void RefreshCollectionDisplay()
     {
+
+        if (CollectionPanelManager.Instance != null)
+        {
+            CollectionPanelManager.Instance.ResetActiveSlotState();
+        }
+
         if (CurrentUser == null)
         {
             Debug.LogWarning("ログイン中のユーザーがいないため、図鑑を更新できません。");

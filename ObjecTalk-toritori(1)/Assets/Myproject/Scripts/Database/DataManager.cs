@@ -209,4 +209,30 @@ public class DatabaseManager
             throw;
         }
     }
+
+    /// <summary>
+    /// 指定されたIDのオブジェクトを、関連データも含めてDBから削除します。
+    /// </summary>
+    /// <param name="objectId">削除するオブジェクトのID</param>
+    public void DeleteObject(string objectId)
+    {
+        _connection.BeginTransaction();
+        try
+        {
+            // 1. オブジェクトと特徴の関連テーブルから削除
+            _connection.Table<ObjectFeature>().Delete(of => of.object_id == objectId);
+
+            // 2. オブジェクト本体をテーブルから削除
+            _connection.Delete<ObjectItem>(objectId);
+
+            _connection.Commit();
+            Debug.Log($"オブジェクト(ID: {objectId})をデータベースから削除しました。");
+        }
+        catch (System.Exception ex)
+        {
+            _connection.Rollback();
+            Debug.LogError($"オブジェクトの削除中にエラーが発生しました: {ex.Message}");
+            throw;
+        }
+    }
 }
