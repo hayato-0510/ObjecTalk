@@ -5,6 +5,7 @@ using Unity.Barracuda;
 using OpenCvSharp;
 using System.Collections.Generic;
 using System.Linq;
+using System;
 
 [System.Serializable]
 public class RegisteredObject
@@ -24,6 +25,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 {
     private enum AppMode { Recognition, Naming, Placement }
     private AppMode currentMode = AppMode.Recognition;
+    private DatabaseManager dbManager;
 
     [Header("AIモデル")]
     public NNModel modelAsset;
@@ -81,6 +83,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     void Start()
     {
+        dbManager = new DatabaseManager();
+
         var model = ModelLoader.Load(modelAsset);
         worker = WorkerFactory.CreateWorker(WorkerFactory.Type.ComputePrecompiled, model);
         featureDetector = AKAZE.Create();
@@ -91,7 +95,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         registerStartButton.onClick.AddListener(OnRegisterStart);
         nextButton.onClick.AddListener(OnNameConfirmed);
-        confirmButton.onClick.AddListener(OnConfirmRegistration);
+        //confirmButton.onClick.AddListener(OnConfirmRegistration);
         backButton.onClick.AddListener(OnBackButtonClicked);
 
         eyeToggle.onValueChanged.AddListener(OnCategoryChanged);
@@ -174,25 +178,41 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public void OnBackButtonClicked()
     {
-        // 現在のモードに応じて、戻るべき場所を判断
+        // この部分はご自身のプロジェクトのシーン構成に合わせて調整してください
         if (currentMode == AppMode.Recognition)
         {
-            // 【ここが修正点】
-            // 認識モードの時だけ、別のシーン（Myscene）の特定パネルに戻る
-
-            // 1. 次のシーンで表示したいパネルの名前を「運び屋」にセット
-            SceneTransitionData.TargetPanelName = "HomePanel(Talk)";
-
-            // 2. 次のシーンの名前を指定してロード
-            // (あなたのメインメニューシーンの名前に書き換えてください)
-            UnityEngine.SceneManagement.SceneManager.LoadScene("Myscene");
-
+            // UnityEngine.SceneManagement.SceneManager.LoadScene("YourMenuSceneName");
+        }
+        else if (currentMode == AppMode.Naming)
+        {
+            currentMode = AppMode.Recognition;
+            uiManager.ShowPanel(recognitionPanel);
+        }
+        else if (currentMode == AppMode.Placement)
+        {
+            currentMode = AppMode.Naming;
+            uiManager.ShowPanel(namingPanel);
         }
     }
 
     public void OnConfirmRegistration()
     {
-        if (string.IsNullOrEmpty(tempObjectName) || tempSnapshot == null) return;
+        confirmButton.interactable = false;
+
+        if (string.IsNullOrEmpty(tempObjectName) || tempSnapshot == null)
+        {
+            confirmButton.interactable = true;
+            return;
+        }
+
+        User currentUser = IntegratedAuthManager.Instance.CurrentUser;
+
+        if (currentUser == null)
+        {
+            Debug.LogError("ログイン情報が見つかりません。オブジェクトを登録できませんでした。");
+            confirmButton.interactable = true;
+            return;
+        }
 
         float[] featureVector = GetFeatureVectorFromTexture(tempSnapshot);
         Mat snapshotMat = OpenCvSharp.Unity.TextureToMat(tempSnapshot);
@@ -231,8 +251,27 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             MouthStyleId = currentMouthId
         });
 
-        snapshotMat.Dispose();
+        var newObjectItem = new ObjectItem
+        {
+            object_id = Guid.NewGuid().ToString(),
+            user_id = currentUser.user_id,
+            Name = tempObjectName,
+            ImageURL = null
+        };
 
+        try
+        {
+            dbManager.SaveObjectWithFeatures(newObjectItem, new List<string>());
+            Debug.Log($"? オブジェクト「{tempObjectName}」をユーザー({currentUser.user_id})のデータとして保存しました。");
+
+            IntegratedAuthManager.Instance.RefreshCollectionDisplay();
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"? データベースへの保存に失敗しました: {e.Message}");
+        }
+
+        snapshotMat.Dispose();
         currentMode = AppMode.Recognition;
         uiManager.ShowPanel(recognitionPanel);
     }

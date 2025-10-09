@@ -5,13 +5,16 @@ using Firebase.Auth;
 
 public class IntegratedAuthManager : MonoBehaviour
 {
+    // シングルトン化するためのインスタンス
+    public static IntegratedAuthManager Instance { get; private set; }
+
+    // 外部から参照できる現在のユーザー情報
+    public User CurrentUser { get; private set; }
+
     [Header("UI Handler References")]
     public LoginUIHandler loginUIHandler;
     public RegistrationUIHandler registrationUIHandler;
     public FlexibleUIManager uiManager;
-
-    [Header("連携する画面の管理コンポーネント")]
-    [SerializeField] private ProfileEditor profileEditor;
 
     [Header("共通UI")]
     public GameObject loadingPanel;
@@ -21,18 +24,29 @@ public class IntegratedAuthManager : MonoBehaviour
     public GameObject panelToShowOnSuccess;
     public string mainMenuSceneName = "MainMenu";
 
+    [Header("Collection Panel")]
+    public SlotGrid collectionSlotGrid;
+
     [Header("開発設定")]
     public bool sendVerificationEmail = false;
 
     private bool isProcessing = false;
     private DatabaseManager databaseManager;
-    private User loggedInUser;
-
-    // ★修正点1: 新規登録処理中であることを示すフラグを追加
-    private bool isHandlingRegistration = false;
 
     void Awake()
     {
+        // シングルトンの設定
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject); // シーンをまたいで永続化させたい場合はこの行を有効化
+        }
+        else
+        {
+            Destroy(gameObject);
+            return;
+        }
+
         databaseManager = new DatabaseManager();
     }
 
@@ -43,9 +57,34 @@ public class IntegratedAuthManager : MonoBehaviour
         HideLoading();
     }
 
+    /// <summary>
+    /// 現在ログインしているユーザーのデータで図鑑の表示を更新します。
+    /// </summary>
+    public void RefreshCollectionDisplay()
+    {
+        if (CurrentUser == null)
+        {
+            Debug.LogWarning("ログイン中のユーザーがいないため、図鑑を更新できません。");
+            return;
+        }
+
+        if (collectionSlotGrid == null)
+        {
+            Debug.Log("SlotGridへの参照が失われていたため、再検索します。");
+            collectionSlotGrid = FindFirstObjectByType<SlotGrid>();
+        }
+
+        var userObjects = databaseManager.GetAllUserObjectsWithDetails(CurrentUser.user_id);
+
+        if (collectionSlotGrid != null)
+        {
+            collectionSlotGrid.InitializeCollection(userObjects);
+            Debug.Log("図鑑の表示を最新の情報に更新しました。");
+        }
+    }
+
     private void SetupEvents()
     {
-        // ... (この部分に変更はありません) ...
         if (loginUIHandler != null)
         {
             loginUIHandler.OnLoginRequested += HandleLoginRequested;
@@ -65,10 +104,12 @@ public class IntegratedAuthManager : MonoBehaviour
         AuthenticationManager.OnAuthError += OnAuthError;
     }
 
-    // ... ShowPanel, HandleLoginRequested, HandleForgotPasswordRequested に変更はありません ...
     private void ShowPanel(GameObject panel)
     {
-        if (uiManager != null) { uiManager.ShowPanel(panel); }
+        if (uiManager != null)
+        {
+            uiManager.ShowPanel(panel);
+        }
         else
         {
             loginUIHandler?.gameObject.SetActive(panel == loginUIHandler.gameObject);
@@ -83,11 +124,34 @@ public class IntegratedAuthManager : MonoBehaviour
         ShowLoading("ログイン中...");
         bool success = await AuthenticationManager.Instance.LoginAsync(email, password);
         isProcessing = false;
+        HideLoading();
         if (!success)
         {
-            HideLoading();
             loginUIHandler.ShowLoginError("ログインに失敗しました。");
         }
+    }
+
+    private async void HandleRegistrationRequested(string name, string email, string password)
+    {
+        if (isProcessing) return;
+        isProcessing = true;
+        ShowLoading("アカウントを作成中...");
+        bool success = await AuthenticationManager.Instance.RegisterAsync(email, password, name);
+        if (success)
+        {
+            if (sendVerificationEmail && AuthenticationManager.Instance.CurrentUser != null)
+            {
+                await AuthenticationManager.Instance.CurrentUser.SendEmailVerificationAsync();
+                Debug.Log("確認メールを送信しました。");
+            }
+            SaveUserToDatabase(name, email, AuthenticationManager.Instance.CurrentUser.UserId);
+        }
+        else
+        {
+            registrationUIHandler.ShowRegistrationError("登録に失敗しました。");
+        }
+        isProcessing = false;
+        HideLoading();
     }
 
     private async void HandleForgotPasswordRequested(string email)
@@ -95,62 +159,47 @@ public class IntegratedAuthManager : MonoBehaviour
         ShowLoading("パスワードリセットメールを送信中...");
         bool success = await AuthenticationManager.Instance.SendPasswordResetEmailAsync(email);
         HideLoading();
-        if (success) { loginUIHandler.ShowLoginSuccess("パスワードリセット用のメールを送信しました。"); }
-        else { loginUIHandler.ShowLoginError("パスワードリセットメールの送信に失敗しました。"); }
-    }
-
-
-    // ★修正点2: HandleRegistrationRequested メソッドを大幅に書き換える
-    private async void HandleRegistrationRequested(string name, string email, string password)
-    {
-        if (isProcessing) return;
-
-        isProcessing = true;
-        isHandlingRegistration = true; // 登録処理の開始を通知
-        ShowLoading("アカウントを作成中...");
-
-        bool success = await AuthenticationManager.Instance.RegisterAsync(email, password, name);
-
         if (success)
         {
-            Debug.Log($"Firebaseへのユーザー登録に成功しました！");
-
-            // DBへの保存処理
-            User newUser = SaveUserToDatabase(name, email, AuthenticationManager.Instance.CurrentUser.UserId);
-
-            if (newUser != null)
-            {
-                // DB保存成功後、手動で初期化と画面遷移を行う
-                InitializeAllComponents(newUser);
-                StartCoroutine(TransitionToMainMenu());
-            }
-            else
-            {
-                // DB保存に失敗した場合
-                OnAuthError("データベースへのユーザー保存に失敗しました。");
-            }
+            loginUIHandler.ShowLoginSuccess("パスワードリセット用のメールを送信しました。");
         }
-
-        // isProcessingは遷移後またはエラー表示後にfalseにする
-        isHandlingRegistration = false; // 登録処理の終了を通知
+        else
+        {
+            loginUIHandler.ShowLoginError("パスワードリセットメールの送信に失敗しました。");
+        }
     }
 
-    // ========== AuthenticationManager イベントハンドラー ==========
-
-    // ★修正点3: OnUserLoggedIn メソッドをシンプルにする
     private void OnUserLoggedIn(FirebaseUser user)
     {
-        // 新規登録処理中は、このイベントを無視する
-        if (isHandlingRegistration)
+        Debug.Log($"ユーザーがログインしました: {user.Email}");
+
+        CurrentUser = databaseManager.GetUser(user.UserId);
+
+        // もしデータベースにユーザーが見つからなかった場合
+        if (CurrentUser == null)
         {
-            Debug.Log("新規登録処理中のため、自動ログインイベントはスキップします。");
-            return;
+            Debug.LogWarning($"ローカルDBにユーザー(ID: {user.UserId})が見つかりませんでした。新規に作成します。");
+
+            // 登録フローで使っているメソッドを呼び出して、ローカルDBにユーザー情報を作成する
+            // ユーザー名はFirebaseのDisplayNameから、なければEmailから取得する
+            string name = !string.IsNullOrEmpty(user.DisplayName) ? user.DisplayName : user.Email;
+            SaveUserToDatabase(name, user.Email, user.UserId);
+
+            // 作成後、再度データベースから取得して CurrentUser に設定する
+            CurrentUser = databaseManager.GetUser(user.UserId);
         }
 
-        Debug.Log($"通常のログインフローを実行します: {user.Email}");
+        if (CurrentUser != null)
+        {
+            // 他のUI要素（ToggleSwitchなど）の初期化処理...
 
-        User appUser = databaseManager.GetUser(user.UserId);
-        InitializeAllComponents(appUser);
+            // ログイン時に図鑑を初期化
+            RefreshCollectionDisplay();
+        }
+        else
+        {
+            Debug.LogError("データベースにログインしたユーザーが見つかりません。");
+        }
         StartCoroutine(TransitionToMainMenu());
     }
 
@@ -174,42 +223,16 @@ public class IntegratedAuthManager : MonoBehaviour
     {
         Debug.LogError($"認証エラー: {errorMessage}");
         string parsedMessage = AuthUtils.ParseErrorMessage(errorMessage);
-
-        if (registrationUIHandler != null && registrationUIHandler.gameObject.activeSelf)
+        if (registrationUIHandler.gameObject.activeSelf)
         {
             registrationUIHandler.ShowRegistrationError(parsedMessage);
         }
         else
         {
-            loginUIHandler?.ShowLoginError(parsedMessage);
+            loginUIHandler.ShowLoginError(parsedMessage);
         }
-        isProcessing = false;
         HideLoading();
     }
-
-    // 不要になったDelayedInitializationコルーチンは削除
-
-    private void InitializeAllComponents(User user)
-    {
-        if (user == null)
-        {
-            Debug.LogError("初期化しようとしましたが、ユーザー情報がnullです。");
-            return;
-        }
-
-        this.loggedInUser = user;
-
-        ToggleSwitch[] toggleSwitches = FindObjectsByType<ToggleSwitch>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (ToggleSwitch toggle in toggleSwitches) { toggle.Initialize(this.loggedInUser, databaseManager); }
-
-        AppSettingsUIController[] settingsControllers = FindObjectsByType<AppSettingsUIController>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (AppSettingsUIController controller in settingsControllers) { controller.Initialize(this.loggedInUser, databaseManager); }
-
-        ProfileEditor[] profileEditors = FindObjectsByType<ProfileEditor>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        foreach (ProfileEditor editor in profileEditors) { editor.Initialize(this.loggedInUser, databaseManager); }
-    }
-
-    // ========== ユーティリティメソッド ==========
 
     private void ShowLoading(string message)
     {
@@ -224,19 +247,24 @@ public class IntegratedAuthManager : MonoBehaviour
 
     private IEnumerator TransitionToMainMenu()
     {
-        ShowLoading("処理完了。画面を切り替えています...");
+        ShowLoading("ログイン処理完了。画面を切り替えています...");
         yield return new WaitForSeconds(1f);
-
-        if (uiManager != null && panelToShowOnSuccess != null) { uiManager.ShowPanel(panelToShowOnSuccess); }
-        else if (!string.IsNullOrEmpty(mainMenuSceneName)) { SceneManager.LoadScene(mainMenuSceneName); }
-        else { loginUIHandler.ShowLoginSuccess("ログインが完了しました。"); }
-
-        isProcessing = false; // 遷移または成功表示が完了した時点でfalseに
+        if (uiManager != null && panelToShowOnSuccess != null)
+        {
+            uiManager.ShowPanel(panelToShowOnSuccess);
+        }
+        else if (!string.IsNullOrEmpty(mainMenuSceneName))
+        {
+            SceneManager.LoadScene(mainMenuSceneName);
+        }
+        else
+        {
+            loginUIHandler.ShowLoginSuccess("ログインが完了しました。");
+        }
         HideLoading();
     }
 
-    // ★修正点4: SaveUserToDatabaseがUserオブジェクトを返すように変更
-    private User SaveUserToDatabase(string name, string email, string firebaseUserId)
+    private void SaveUserToDatabase(string name, string email, string firebaseUserId)
     {
         try
         {
@@ -250,19 +278,16 @@ public class IntegratedAuthManager : MonoBehaviour
                 IsWeatherSyncEnabled = false
             };
             databaseManager.SaveUser(newUser);
-            Debug.Log($"ユーザー({name})をデータベースに保存しました。");
-            return newUser;
+            Debug.Log($"ユーザー情報をデータベースに保存しました。");
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"データベースへの保存中に例外が発生しました: {e.Message}");
-            return null;
+            Debug.LogError($"データベースへの保存でエラーが発生しました: {e.Message}");
         }
     }
 
     void OnDestroy()
     {
-        // ... (この部分に変更はありません) ...
         if (loginUIHandler != null)
         {
             loginUIHandler.OnLoginRequested -= HandleLoginRequested;

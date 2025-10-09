@@ -1,36 +1,33 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro;
+
 public class Slot : MonoBehaviour
 {
-    private Item item;
-
     [SerializeField]
     private Image itemImage;
     [SerializeField]
     private TextMeshProUGUI itemNameText;
 
-    public Item MyItem { get => item; private set => item = value; }
-
-    public void SetItem(Item item)
+    /// <summary>
+    /// ObjectItemデータを受け取り、スロットのUIに名前などを設定します。
+    /// </summary>
+    public void SetItem(ObjectItem item)
     {
-        MyItem = item;
-
         if (item != null)
         {
-            itemImage.enabled = true; //Colorではなくenabledで表示/非表示を切り替え
-            itemImage.sprite = item.MyItemImage;
+            // 現在は画像の情報がないため非表示
+            itemImage.enabled = false;
 
-            itemNameText.enabled = true; //テキストを表示する
-            itemNameText.text = item.MyItemName; // テキストにアイテム名を設定
+            // テキストを表示し、受け取ったアイテムの名前を設定
+            itemNameText.enabled = true;
+            itemNameText.text = item.Name;
         }
         else
         {
-            itemImage.enabled = false; // 画像を非表示にする
-
-            itemNameText.enabled = false; // テキストを非表示にする
-            itemNameText.text = ""; // 念のためテキストを空にする
+            itemImage.enabled = false;
+            itemNameText.enabled = false;
+            itemNameText.text = "";
         }
-        
     }
 }
