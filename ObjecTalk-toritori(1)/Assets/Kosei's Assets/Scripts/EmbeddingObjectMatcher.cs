@@ -207,6 +207,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         User currentUser = IntegratedAuthManager.Instance.CurrentUser;
 
+        byte[] imageBytes = tempSnapshot.EncodeToJPG();
+
+
         if (currentUser == null)
         {
             Debug.LogError("ログイン情報が見つかりません。オブジェクトを登録できませんでした。");
@@ -256,19 +259,21 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             object_id = Guid.NewGuid().ToString(),
             user_id = currentUser.user_id,
             Name = tempObjectName,
-            ImageURL = null
+
+            ImageData = imageBytes,
+            //ImageURL = null
         };
 
         try
         {
             dbManager.SaveObjectWithFeatures(newObjectItem, new List<string>());
-            Debug.Log($"? オブジェクト「{tempObjectName}」をユーザー({currentUser.user_id})のデータとして保存しました。");
+            Debug.Log($" オブジェクト「{tempObjectName}」をユーザー({currentUser.user_id})のデータとして保存しました。");
 
             IntegratedAuthManager.Instance.RefreshCollectionDisplay();
         }
         catch (Exception e)
         {
-            Debug.LogError($"? データベースへの保存に失敗しました: {e.Message}");
+            Debug.LogError($" データベースへの保存に失敗しました: {e.Message}");
         }
 
         snapshotMat.Dispose();

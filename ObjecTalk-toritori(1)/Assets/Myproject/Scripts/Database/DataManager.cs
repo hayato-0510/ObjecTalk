@@ -30,12 +30,14 @@ public class ObjectItem
     public string user_id { get; set; }
     [Column("name")]
     public string Name { get; set; }
+    [Column("image_data")]
+    public byte[] ImageData { get; set; }
     [Column("category")]
     public string Category { get; set; }
     [Column("ai_description")]
     public string AiDescription { get; set; }
-    [Column("image_url")]
-    public string ImageURL { get; set; }
+    //[Column("image_url")]
+    //public string ImageURL { get; set; }
     [Ignore]
     public List<Feature> Features { get; set; } = new List<Feature>();
 }

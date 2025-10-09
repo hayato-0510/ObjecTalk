@@ -2916,9 +2916,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   slotPrefab: {fileID: 4070560113804637543, guid: b41aba20d30a68b4dbf053c20dce818b, type: 3}
-  allItems:
-  - {fileID: 11400000, guid: 0025869c2eeda0d45909770b1f57eee5, type: 2}
-  - {fileID: 11400000, guid: fc9950e4e0b624a4594e090b82964603, type: 2}
 --- !u!1 &497819530
 GameObject:
   m_ObjectHideFlags: 0
@@ -4497,6 +4494,7 @@ GameObject:
   - component: {fileID: 754281230}
   - component: {fileID: 754281229}
   - component: {fileID: 754281228}
+  - component: {fileID: 754281231}
   m_Layer: 5
   m_Name: Bookshelf_Button
   m_TagString: Untagged
@@ -4579,6 +4577,18 @@ MonoBehaviour:
           m_StringArgument: 
           m_BoolArgument: 0
         m_CallState: 2
+      - m_Target: {fileID: 754281231}
+        m_TargetAssemblyTypeName: CollectionPanelManager, Assembly-CSharp
+        m_MethodName: ShowPanelAndRefresh
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &754281229
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4617,6 +4627,19 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 754281226}
   m_CullTransparentMesh: 1
+--- !u!114 &754281231
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 754281226}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 288c2688625032548a0cac015384fdbd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  uiManager: {fileID: 0}
 --- !u!1 &762666954
 GameObject:
   m_ObjectHideFlags: 0
@@ -5206,11 +5229,11 @@ MonoBehaviour:
   loginUIHandler: {fileID: 1882365515}
   registrationUIHandler: {fileID: 9106605560621051632}
   uiManager: {fileID: 1504754974}
-  profileEditor: {fileID: 1431520636}
   loadingPanel: {fileID: 0}
   loadingText: {fileID: 0}
   panelToShowOnSuccess: {fileID: 219286577043567326}
   mainMenuSceneName: MainMenu
+  collectionSlotGrid: {fileID: 476459980}
   sendVerificationEmail: 1
 --- !u!1 &894943796
 GameObject:
@@ -5356,6 +5379,7 @@ GameObject:
   - component: {fileID: 939682998}
   - component: {fileID: 939682997}
   - component: {fileID: 939682996}
+  - component: {fileID: 939682999}
   m_Layer: 5
   m_Name: Bookshelf_Button
   m_TagString: Untagged
@@ -5438,6 +5462,18 @@ MonoBehaviour:
           m_StringArgument: 
           m_BoolArgument: 0
         m_CallState: 2
+      - m_Target: {fileID: 939682999}
+        m_TargetAssemblyTypeName: CollectionPanelManager, Assembly-CSharp
+        m_MethodName: ShowPanelAndRefresh
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &939682997
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5476,6 +5512,19 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 939682994}
   m_CullTransparentMesh: 1
+--- !u!114 &939682999
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 939682994}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 288c2688625032548a0cac015384fdbd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  uiManager: {fileID: 0}
 --- !u!1 &1003904283
 GameObject:
   m_ObjectHideFlags: 0
@@ -7838,6 +7887,7 @@ GameObject:
   - component: {fileID: 1546736544}
   - component: {fileID: 1546736543}
   - component: {fileID: 1546736542}
+  - component: {fileID: 1546736545}
   m_Layer: 5
   m_Name: Bookshelf_Button
   m_TagString: Untagged
@@ -7920,6 +7970,18 @@ MonoBehaviour:
           m_StringArgument: 
           m_BoolArgument: 0
         m_CallState: 2
+      - m_Target: {fileID: 1546736545}
+        m_TargetAssemblyTypeName: CollectionPanelManager, Assembly-CSharp
+        m_MethodName: ShowPanelAndRefresh
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &1546736543
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7958,6 +8020,19 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1546736540}
   m_CullTransparentMesh: 1
+--- !u!114 &1546736545
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1546736540}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 288c2688625032548a0cac015384fdbd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  uiManager: {fileID: 0}
 --- !u!1 &1573831955
 GameObject:
   m_ObjectHideFlags: 0
@@ -7970,6 +8045,7 @@ GameObject:
   - component: {fileID: 1573831959}
   - component: {fileID: 1573831958}
   - component: {fileID: 1573831957}
+  - component: {fileID: 1573831960}
   m_Layer: 5
   m_Name: Bookshelf_Button
   m_TagString: Untagged
@@ -8052,6 +8128,18 @@ MonoBehaviour:
           m_StringArgument: 
           m_BoolArgument: 0
         m_CallState: 2
+      - m_Target: {fileID: 1573831960}
+        m_TargetAssemblyTypeName: CollectionPanelManager, Assembly-CSharp
+        m_MethodName: ShowPanelAndRefresh
+        m_Mode: 1
+        m_Arguments:
+          m_ObjectArgument: {fileID: 0}
+          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
+          m_IntArgument: 0
+          m_FloatArgument: 0
+          m_StringArgument: 
+          m_BoolArgument: 0
+        m_CallState: 2
 --- !u!114 &1573831958
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -8090,6 +8178,19 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1573831955}
   m_CullTransparentMesh: 1
+--- !u!114 &1573831960
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1573831955}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 288c2688625032548a0cac015384fdbd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  uiManager: {fileID: 0}
 --- !u!1 &1635279108
 GameObject:
   m_ObjectHideFlags: 0
@@ -18832,6 +18933,8 @@ GameObject:
   - component: {fileID: 2395711195834215298}
   - component: {fileID: 2651727792611858131}
   - component: {fileID: 3120472698337792174}
+  - component: {fileID: 7559286142030675843}
+  - component: {fileID: 7559286142030675842}
   m_Layer: 5
   m_Name: Collection
   m_TagString: Untagged
@@ -18839,6 +18942,32 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 0
+--- !u!114 &7559286142030675842
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7559286142030675841}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 288c2688625032548a0cac015384fdbd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  uiManager: {fileID: 1504754974}
+--- !u!114 &7559286142030675843
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7559286142030675841}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 288c2688625032548a0cac015384fdbd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  uiManager: {fileID: 0}
 --- !u!1 &7570777882452896366
 GameObject:
   m_ObjectHideFlags: 0
