@@ -162,6 +162,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public void OnRegisterStart()
     {
+        // この処理を追加: 登録フローの開始時に、確定ボタンを必ず有効な状態に戻す
+        if (confirmButton != null)
+        {
+            confirmButton.interactable = true;
+        }
         tempSnapshot = new Texture2D(webcamTexture.width, webcamTexture.height, TextureFormat.RGB24, false);
         tempSnapshot.SetPixels(webcamTexture.GetPixels());
         tempSnapshot.Apply();
