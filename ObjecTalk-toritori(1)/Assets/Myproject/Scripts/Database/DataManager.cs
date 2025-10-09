@@ -36,6 +36,36 @@ public class ObjectItem
     public string Category { get; set; }
     [Column("ai_description")]
     public string AiDescription { get; set; }
+
+    [Column("feature_vector_blob")]
+    public byte[] FeatureVectorBlob { get; set; }
+
+    // ★追加: KeyPointデータを保存する
+    [Column("keypoints_blob")]
+    public byte[] KeyPointsBlob { get; set; }
+
+    // ★追加: Descriptorデータを保存する
+    [Column("descriptors_blob")]
+    public byte[] DescriptorsBlob { get; set; }
+
+    [Column("eye_pos_x")]
+    public float EyePositionX { get; set; }
+    [Column("eye_pos_y")]
+    public float EyePositionY { get; set; }
+    [Column("mouth_pos_x")]
+    public float MouthPositionX { get; set; }
+    [Column("mouth_pos_y")]
+    public float MouthPositionY { get; set; }
+    [Column("image_width")]
+    public int ImageWidth { get; set; }
+    [Column("image_height")]
+    public int ImageHeight { get; set; }
+
+    [Column("eye_style_id")]
+    public int EyeStyleId { get; set; }
+    [Column("mouth_style_id")]
+    public int MouthStyleId { get; set; }
+
     //[Column("image_url")]
     //public string ImageURL { get; set; }
     [Ignore]
@@ -58,6 +88,12 @@ public class ObjectFeature
     public string object_id { get; set; }
     [Indexed]
     public int feature_id { get; set; }
+    // 追加: 特徴ベクトルをバイナリデータとして保存するためのプロパティ
+    [Column("feature_vector_blob")]
+    public byte[] FeatureVectorBlob { get; set; }
+
+    [Column("image_url")]
+    public string ImageURL { get; set; }
 }
 
 public class DatabaseManager

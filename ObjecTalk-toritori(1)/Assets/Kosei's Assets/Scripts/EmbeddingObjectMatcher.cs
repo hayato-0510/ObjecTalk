@@ -6,6 +6,8 @@ using OpenCvSharp;
 using System.Collections.Generic;
 using System.Linq;
 using System;
+using System.IO;
+using System.Runtime.InteropServices;
 
 [System.Serializable]
 public class RegisteredObject
@@ -89,15 +91,20 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         worker = WorkerFactory.CreateWorker(WorkerFactory.Type.ComputePrecompiled, model);
         featureDetector = AKAZE.Create();
         matcher = new BFMatcher(NormTypes.Hamming);
-        webcamTexture = new WebCamTexture(WebCamTexture.devices[0].name, 1280, 720, 30);
-        cameraDisplay.texture = webcamTexture;
-        webcamTexture.Play();
+
+        if (WebCamTexture.devices.Length > 0)
+        {
+            webcamTexture = new WebCamTexture(WebCamTexture.devices[0].name, 1280, 720, 30);
+            cameraDisplay.texture = webcamTexture;
+            webcamTexture.Play();
+        }
+
+        LoadRegisteredObjectsFromDatabase();
 
         registerStartButton.onClick.AddListener(OnRegisterStart);
         nextButton.onClick.AddListener(OnNameConfirmed);
-        //confirmButton.onClick.AddListener(OnConfirmRegistration);
+        // confirmButtonはInspectorで設定
         backButton.onClick.AddListener(OnBackButtonClicked);
-
         eyeToggle.onValueChanged.AddListener(OnCategoryChanged);
         mouthToggle.onValueChanged.AddListener(OnCategoryChanged);
 
@@ -110,7 +117,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     void Update()
     {
-        if (currentMode == AppMode.Recognition && webcamTexture.didUpdateThisFrame && database.Count > 0)
+        if (currentMode == AppMode.Recognition && webcamTexture != null && webcamTexture.didUpdateThisFrame && database.Count > 0)
         {
             if (Time.time - lastCompareTime > compareInterval)
             {
@@ -118,6 +125,20 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 FindObject();
             }
         }
+    }
+
+    void OnDestroy()
+    {
+        if (registerStartButton != null) registerStartButton.onClick.RemoveListener(OnRegisterStart);
+        if (nextButton != null) nextButton.onClick.RemoveListener(OnNameConfirmed);
+        if (backButton != null) backButton.onClick.RemoveListener(OnBackButtonClicked);
+        if (eyeToggle != null) eyeToggle.onValueChanged.RemoveListener(OnCategoryChanged);
+        if (mouthToggle != null) mouthToggle.onValueChanged.RemoveListener(OnCategoryChanged);
+
+        worker?.Dispose();
+        matcher?.Dispose();
+        featureDetector?.Dispose();
+        if (webcamTexture != null) webcamTexture.Stop();
     }
 
     #region Mode Switching
@@ -134,10 +155,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         currentMode = AppMode.Placement;
         snapshotDisplay_Placement.sprite = snapshotDisplay_Naming.sprite;
         uiManager.ShowPanel(placementPanel);
-
         mouthToggle.isOn = false;
         eyeToggle.isOn = true;
-
         placementEyeImage.gameObject.SetActive(false);
         placementMouthImage.gameObject.SetActive(false);
     }
@@ -162,7 +181,6 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public void OnRegisterStart()
     {
-        // この処理を追加: 登録フローの開始時に、確定ボタンを必ず有効な状態に戻す
         if (confirmButton != null)
         {
             confirmButton.interactable = true;
@@ -183,10 +201,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public void OnBackButtonClicked()
     {
-        // この部分はご自身のプロジェクトのシーン構成に合わせて調整してください
         if (currentMode == AppMode.Recognition)
         {
-            // UnityEngine.SceneManagement.SceneManager.LoadScene("YourMenuSceneName");
+            // ここにご自身のプロジェクトのホーム画面に戻る処理を記述
+            // 例: UnityEngine.SceneManagement.SceneManager.LoadScene("HomeScene");
         }
         else if (currentMode == AppMode.Naming)
         {
@@ -202,23 +220,19 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public void OnConfirmRegistration()
     {
-        confirmButton.interactable = false;
+        if (confirmButton != null) confirmButton.interactable = false;
 
         if (string.IsNullOrEmpty(tempObjectName) || tempSnapshot == null)
         {
-            confirmButton.interactable = true;
+            if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
 
         User currentUser = IntegratedAuthManager.Instance.CurrentUser;
-
-        byte[] imageBytes = tempSnapshot.EncodeToJPG();
-
-
         if (currentUser == null)
         {
             Debug.LogError("ログイン情報が見つかりません。オブジェクトを登録できませんでした。");
-            confirmButton.interactable = true;
+            if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
 
@@ -227,6 +241,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         KeyPoint[] keypoints;
         Mat descriptors = new Mat();
         featureDetector.DetectAndCompute(snapshotMat, null, out keypoints, descriptors);
+
+        byte[] featureVectorBytes = new byte[featureVector.Length * sizeof(float)];
+        Buffer.BlockCopy(featureVector, 0, featureVectorBytes, 0, featureVectorBytes.Length);
+        byte[] keypointsBytes = SerializeKeyPoints(keypoints);
+        byte[] descriptorsBytes = SerializeMat(descriptors);
 
         Vector2 relativeEyePos = new Vector2(-1, -1);
         if (placementEyeImage.gameObject.activeInHierarchy)
@@ -252,7 +271,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             FeatureVector = featureVector,
             Keypoints = keypoints,
             Descriptors = descriptors.Clone(),
-            ImageSize = snapshotMat.Size(),
+            ImageSize = snapshotMat.Size(), // ここでサイズを取得
             RelativeEyePosition = relativeEyePos,
             RelativeMouthPosition = relativeMouthPos,
             EyeStyleId = currentEyeId,
@@ -264,21 +283,31 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             object_id = Guid.NewGuid().ToString(),
             user_id = currentUser.user_id,
             Name = tempObjectName,
+            ImageData = tempSnapshot.EncodeToJPG(),
+            FeatureVectorBlob = featureVectorBytes,
+            KeyPointsBlob = keypointsBytes,
+            DescriptorsBlob = descriptorsBytes,
 
-            ImageData = imageBytes,
-            //ImageURL = null
+            EyePositionX = relativeEyePos.x,
+            EyePositionY = relativeEyePos.y,
+            MouthPositionX = relativeMouthPos.x,
+            MouthPositionY = relativeMouthPos.y,
+
+            ImageWidth = snapshotMat.Size().Width,
+            ImageHeight = snapshotMat.Size().Height,
+
+            EyeStyleId = currentEyeId,
+            MouthStyleId = currentMouthId
         };
 
         try
         {
             dbManager.SaveObjectWithFeatures(newObjectItem, new List<string>());
-            Debug.Log($" オブジェクト「{tempObjectName}」をユーザー({currentUser.user_id})のデータとして保存しました。");
-
-            IntegratedAuthManager.Instance.RefreshCollectionDisplay();
+            Debug.Log($"オブジェクト「{tempObjectName}」とAIデータをDBに保存しました。");
         }
         catch (Exception e)
         {
-            Debug.LogError($" データベースへの保存に失敗しました: {e.Message}");
+            Debug.LogError($"データベースへの保存に失敗しました: {e.Message}");
         }
 
         snapshotMat.Dispose();
@@ -291,7 +320,6 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     void OnCategoryChanged(bool isOn)
     {
         if (!isOn) return;
-
         if (eyeToggle.isOn)
         {
             PopulateStyleScrollView(true);
@@ -328,6 +356,53 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     #endregion
 
     #region Recognition Logic
+    private void LoadRegisteredObjectsFromDatabase()
+    {
+        User currentUser = IntegratedAuthManager.Instance.CurrentUser;
+        if (currentUser == null)
+        {
+            Debug.LogWarning("ログインしていないため、DBから検知用データを読み込めません。");
+            return;
+        }
+
+        List<ObjectItem> userObjects = dbManager.GetAllUserObjectsWithDetails(currentUser.user_id);
+        database.Clear();
+
+        foreach (var item in userObjects)
+        {
+            if (item.FeatureVectorBlob == null || item.FeatureVectorBlob.Length == 0) continue;
+
+            float[] featureVector = new float[item.FeatureVectorBlob.Length / sizeof(float)];
+            Buffer.BlockCopy(item.FeatureVectorBlob, 0, featureVector, 0, item.FeatureVectorBlob.Length);
+
+            KeyPoint[] keypoints = DeserializeKeyPoints(item.KeyPointsBlob);
+            Mat descriptors = DeserializeMat(item.DescriptorsBlob);
+
+            Vector2 eyePos = new Vector2(item.EyePositionX, item.EyePositionY);
+            Vector2 mouthPos = new Vector2(item.MouthPositionX, item.MouthPositionY);
+
+            OpenCvSharp.Size imageSize = new OpenCvSharp.Size(item.ImageWidth, item.ImageHeight);
+
+
+            database.Add(new RegisteredObject
+            {
+                Name = item.Name,
+                FeatureVector = featureVector,
+                Keypoints = keypoints,
+                Descriptors = descriptors,
+
+                RelativeEyePosition = eyePos,
+                RelativeMouthPosition = mouthPos,
+
+                ImageSize = imageSize,
+
+                EyeStyleId = item.EyeStyleId,
+                MouthStyleId = item.MouthStyleId
+            });
+        }
+        Debug.Log($"データベースから{database.Count}件の物体データを読み込み、検知可能になりました。");
+    }
+
     private bool FindObject()
     {
         float[] currentVector = GetFeatureVectorFromTexture(webcamTexture);
@@ -351,7 +426,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Mat liveDescriptors = new Mat();
             featureDetector.DetectAndCompute(liveFrameMat, null, out liveKeypoints, liveDescriptors);
 
-            if (liveKeypoints.Length > 20 && !potentialMatch.Descriptors.Empty())
+            if (liveKeypoints.Length > 20 && potentialMatch.Descriptors != null && !potentialMatch.Descriptors.Empty())
             {
                 var matches = matcher.KnnMatch(potentialMatch.Descriptors, liveDescriptors, 2);
                 var goodMatches = matches.Where(m => m.Length >= 2 && m[0].Distance < 0.75 * m[1].Distance).Select(m => m[0]).ToList();
@@ -452,13 +527,81 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         if (magnitudeA == 0 || magnitudeB == 0) return 0;
         return dotProduct / (magnitudeA * magnitudeB);
     }
+    #endregion
 
-    void OnDestroy()
+    #region Serialization/Deserialization Helpers
+    private byte[] SerializeKeyPoints(KeyPoint[] keyPoints)
     {
-        worker?.Dispose();
-        matcher?.Dispose();
-        featureDetector?.Dispose();
-        if (webcamTexture != null) webcamTexture.Stop();
+        if (keyPoints == null) return null;
+        using (var ms = new MemoryStream())
+        using (var writer = new BinaryWriter(ms))
+        {
+            writer.Write(keyPoints.Length);
+            foreach (var kp in keyPoints)
+            {
+                writer.Write(kp.Pt.X); writer.Write(kp.Pt.Y);
+                writer.Write(kp.Size); writer.Write(kp.Angle);
+                writer.Write(kp.Response); writer.Write(kp.Octave);
+            }
+            return ms.ToArray();
+        }
+    }
+
+    private KeyPoint[] DeserializeKeyPoints(byte[] bytes)
+    {
+        if (bytes == null || bytes.Length == 0) return null;
+        using (var ms = new MemoryStream(bytes))
+        using (var reader = new BinaryReader(ms))
+        {
+            var len = reader.ReadInt32();
+            if (len == 0) return new KeyPoint[0];
+            var keyPoints = new KeyPoint[len];
+            for (int i = 0; i < len; i++)
+            {
+                var x = reader.ReadSingle(); var y = reader.ReadSingle();
+                var size = reader.ReadSingle(); var angle = reader.ReadSingle();
+                var response = reader.ReadSingle(); var octave = reader.ReadInt32();
+                keyPoints[i] = new KeyPoint(new Point2f(x, y), size, angle, response, octave);
+            }
+            return keyPoints;
+        }
+    }
+
+    private byte[] SerializeMat(Mat mat)
+    {
+        if (mat == null || mat.Empty()) return null;
+        var size = mat.Total() * mat.ElemSize();
+        if (size == 0) return null;
+        var data = new byte[size];
+        Marshal.Copy(mat.Data, data, 0, (int)size);
+
+        using (var ms = new MemoryStream())
+        using (var writer = new BinaryWriter(ms))
+        {
+            writer.Write(mat.Rows);
+            writer.Write(mat.Cols);
+            writer.Write((int)mat.Type());
+            writer.Write(data.Length);
+            writer.Write(data);
+            return ms.ToArray();
+        }
+    }
+
+    private Mat DeserializeMat(byte[] bytes)
+    {
+        if (bytes == null || bytes.Length == 0) return null;
+        using (var ms = new MemoryStream(bytes))
+        using (var reader = new BinaryReader(ms))
+        {
+            var rows = reader.ReadInt32();
+            var cols = reader.ReadInt32();
+            var type = (MatType)reader.ReadInt32();
+            var len = reader.ReadInt32();
+            var data = reader.ReadBytes(len);
+            var mat = new Mat(rows, cols, type);
+            if (data.Length > 0) Marshal.Copy(data, 0, mat.Data, data.Length);
+            return mat;
+        }
     }
     #endregion
 }
