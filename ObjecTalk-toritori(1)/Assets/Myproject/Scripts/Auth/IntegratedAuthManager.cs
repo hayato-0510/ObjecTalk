@@ -53,7 +53,10 @@ public class IntegratedAuthManager : MonoBehaviour
     void Start()
     {
         SetupEvents();
-        ShowPanel(loginUIHandler.gameObject);
+        if (loginUIHandler != null)
+        {
+            ShowPanel(loginUIHandler.gameObject);
+        }
         HideLoading();
     }
 
@@ -62,7 +65,7 @@ public class IntegratedAuthManager : MonoBehaviour
     /// </summary>
     public void RefreshCollectionDisplay()
     {
-
+        // CollectionPanelManagerのインスタンスが存在すれば、スロットの状態をリセット
         if (CollectionPanelManager.Instance != null)
         {
             CollectionPanelManager.Instance.ResetActiveSlotState();
@@ -80,6 +83,7 @@ public class IntegratedAuthManager : MonoBehaviour
             collectionSlotGrid = FindFirstObjectByType<SlotGrid>();
         }
 
+        // データベースからユーザーのオブジェクトリストを取得
         var userObjects = databaseManager.GetAllUserObjectsWithDetails(CurrentUser.user_id);
 
         if (collectionSlotGrid != null)
@@ -134,6 +138,8 @@ public class IntegratedAuthManager : MonoBehaviour
         if (!success)
         {
             loginUIHandler.ShowLoginError("ログインに失敗しました。");
+            // ★変更点: IntegratedAuthManagerがコルーチンを開始
+            StartCoroutine(loginUIHandler.HideErrorAfterDelay(5f));
         }
     }
 
@@ -155,6 +161,7 @@ public class IntegratedAuthManager : MonoBehaviour
         else
         {
             registrationUIHandler.ShowRegistrationError("登録に失敗しました。");
+            // こちらも必要であれば同様にコルーチンを開始する修正を追加
         }
         isProcessing = false;
         HideLoading();
@@ -168,10 +175,14 @@ public class IntegratedAuthManager : MonoBehaviour
         if (success)
         {
             loginUIHandler.ShowLoginSuccess("パスワードリセット用のメールを送信しました。");
+            // ★変更点: 成功メッセージも一定時間後に消す
+            StartCoroutine(loginUIHandler.HideErrorAfterDelay(3f));
         }
         else
         {
             loginUIHandler.ShowLoginError("パスワードリセットメールの送信に失敗しました。");
+            // ★変更点: IntegratedAuthManagerがコルーチンを開始
+            StartCoroutine(loginUIHandler.HideErrorAfterDelay(5f));
         }
     }
 
@@ -181,25 +192,18 @@ public class IntegratedAuthManager : MonoBehaviour
 
         CurrentUser = databaseManager.GetUser(user.UserId);
 
-        // もしデータベースにユーザーが見つからなかった場合
         if (CurrentUser == null)
         {
             Debug.LogWarning($"ローカルDBにユーザー(ID: {user.UserId})が見つかりませんでした。新規に作成します。");
-
-            // 登録フローで使っているメソッドを呼び出して、ローカルDBにユーザー情報を作成する
-            // ユーザー名はFirebaseのDisplayNameから、なければEmailから取得する
             string name = !string.IsNullOrEmpty(user.DisplayName) ? user.DisplayName : user.Email;
             SaveUserToDatabase(name, user.Email, user.UserId);
-
-            // 作成後、再度データベースから取得して CurrentUser に設定する
             CurrentUser = databaseManager.GetUser(user.UserId);
         }
 
         if (CurrentUser != null)
         {
-            // 他のUI要素（ToggleSwitchなど）の初期化処理...
+            // 他のUI要素の初期化処理...
 
-            // ログイン時に図鑑を初期化
             RefreshCollectionDisplay();
         }
         else
@@ -215,6 +219,7 @@ public class IntegratedAuthManager : MonoBehaviour
         ShowPanel(loginUIHandler.gameObject);
         loginUIHandler?.ClearInputFields();
         HideLoading();
+        CurrentUser = null; // ユーザー情報をクリア
     }
 
     private void OnSessionExpired()
@@ -222,20 +227,25 @@ public class IntegratedAuthManager : MonoBehaviour
         Debug.Log("セッションが期限切れです");
         ShowPanel(loginUIHandler.gameObject);
         loginUIHandler.ShowLoginError("セッションが期限切れです。再度ログインしてください。");
+        StartCoroutine(loginUIHandler.HideErrorAfterDelay(5f));
         HideLoading();
+        CurrentUser = null; // ユーザー情報をクリア
     }
 
     private void OnAuthError(string errorMessage)
     {
         Debug.LogError($"認証エラー: {errorMessage}");
         string parsedMessage = AuthUtils.ParseErrorMessage(errorMessage);
-        if (registrationUIHandler.gameObject.activeSelf)
+        if (registrationUIHandler != null && registrationUIHandler.gameObject.activeSelf)
         {
             registrationUIHandler.ShowRegistrationError(parsedMessage);
+            // こちらも必要であれば同様にコルーチンを開始する修正を追加
         }
-        else
+        else if (loginUIHandler != null)
         {
             loginUIHandler.ShowLoginError(parsedMessage);
+            // ★変更点: IntegratedAuthManagerがコルーチンを開始
+            StartCoroutine(loginUIHandler.HideErrorAfterDelay(5f));
         }
         HideLoading();
     }
@@ -266,6 +276,7 @@ public class IntegratedAuthManager : MonoBehaviour
         else
         {
             loginUIHandler.ShowLoginSuccess("ログインが完了しました。");
+            StartCoroutine(loginUIHandler.HideErrorAfterDelay(3f));
         }
         HideLoading();
     }
@@ -294,14 +305,17 @@ public class IntegratedAuthManager : MonoBehaviour
 
     void OnDestroy()
     {
+        // ★改善点: 登録したすべてのイベントを解除する
         if (loginUIHandler != null)
         {
             loginUIHandler.OnLoginRequested -= HandleLoginRequested;
             loginUIHandler.OnForgotPasswordRequested -= HandleForgotPasswordRequested;
+            loginUIHandler.OnSwitchToRegisterClicked -= () => ShowPanel(registrationUIHandler.gameObject);
         }
         if (registrationUIHandler != null)
         {
             registrationUIHandler.OnRegistrationRequested -= HandleRegistrationRequested;
+            registrationUIHandler.OnSwitchToLoginClicked -= () => ShowPanel(loginUIHandler.gameObject);
         }
         if (AuthenticationManager.Instance != null)
         {

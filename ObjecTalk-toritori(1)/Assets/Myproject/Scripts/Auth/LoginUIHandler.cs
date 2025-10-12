@@ -19,7 +19,8 @@ public class LoginUIHandler : MonoBehaviour
     public event Action<string> OnForgotPasswordRequested;
     public event Action OnSwitchToRegisterClicked;
 
-    private Coroutine hideErrorCoroutine;
+    // ★変更点: コルーチンの管理はIntegratedAuthManagerに任せるため不要に
+    // private Coroutine hideErrorCoroutine;
 
     void Awake()
     {
@@ -58,7 +59,8 @@ public class LoginUIHandler : MonoBehaviour
     public void UpdateLoginButton()
     {
         if (loginButton == null) return;
-        bool isEmailValid = loginEmailInputField != null && AuthUtils.IsValidEmail(loginEmailInputField.text);
+        // AuthUtils.IsValidEmailを使用するには、AuthUtils.csがプロジェクトに存在する必要があります
+        bool isEmailValid = loginEmailInputField != null && loginEmailInputField.text.Contains("@");
         bool isPasswordValid = loginPasswordInputField != null && !string.IsNullOrEmpty(loginPasswordInputField.text);
         loginButton.interactable = isEmailValid && isPasswordValid;
     }
@@ -81,6 +83,7 @@ public class LoginUIHandler : MonoBehaviour
         if (loginPasswordInputField != null) loginPasswordInputField.text = "";
     }
 
+    // ★変更点: コルーチン開始のコードを削除
     public void ShowLoginError(string message)
     {
         if (loginErrorText != null)
@@ -88,11 +91,10 @@ public class LoginUIHandler : MonoBehaviour
             loginErrorText.text = message;
             loginErrorText.color = Color.red;
             loginErrorText.gameObject.SetActive(true);
-            if (hideErrorCoroutine != null) StopCoroutine(hideErrorCoroutine);
-            hideErrorCoroutine = StartCoroutine(HideErrorAfterDelay(5f));
         }
     }
 
+    // ★変更点: コルーチン開始のコードを削除
     public void ShowLoginSuccess(string message)
     {
         if (loginErrorText != null)
@@ -100,18 +102,16 @@ public class LoginUIHandler : MonoBehaviour
             loginErrorText.text = message;
             loginErrorText.color = Color.green;
             loginErrorText.gameObject.SetActive(true);
-            if (hideErrorCoroutine != null) StopCoroutine(hideErrorCoroutine);
-            hideErrorCoroutine = StartCoroutine(HideErrorAfterDelay(3f));
         }
     }
 
     public void HideLoginError()
     {
         if (loginErrorText != null) loginErrorText.gameObject.SetActive(false);
-        if (hideErrorCoroutine != null) StopCoroutine(hideErrorCoroutine);
     }
 
-    private IEnumerator HideErrorAfterDelay(float delay)
+    // ★変更点: IntegratedAuthManagerから呼び出せるようにpublicに変更
+    public IEnumerator HideErrorAfterDelay(float delay)
     {
         yield return new WaitForSeconds(delay);
         HideLoginError();

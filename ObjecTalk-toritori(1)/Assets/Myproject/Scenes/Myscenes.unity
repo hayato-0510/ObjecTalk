@@ -4974,7 +4974,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5dc03191f81efad4cbc35d6fcf98ce67, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maintainLoginState: 1
+  maintainLoginState: 0
   sessionTimeoutMinutes: 1
 --- !u!1 &792068647
 GameObject:
