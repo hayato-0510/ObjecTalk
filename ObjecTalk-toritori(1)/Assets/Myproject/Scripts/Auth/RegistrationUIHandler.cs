@@ -7,16 +7,18 @@ using System.Collections;
 public class RegistrationUIHandler : MonoBehaviour
 {
     [Header("新規登録UI")]
-    public TMP_InputField nameInputField;
+    // ★変更: nameInputFieldからusernameInputFieldに名称変更
+    public TMP_InputField usernameInputField;
     public TMP_InputField regEmailInputField;
     public TMP_InputField regPasswordInputField;
     public Button registerButton;
     public Button switchToLoginButton;
-    public TMP_Text nameHintText;
+    // ★変更: nameHintTextからusernameHintTextに名称変更
+    public TMP_Text usernameHintText;
     public TMP_Text regPasswordHintText;
     public TMP_Text registrationErrorText;
 
-    // イベントデリゲートを定義
+    // イベントデリゲートを定義 (引数は username, email, password)
     public event Action<string, string, string> OnRegistrationRequested;
     public event Action OnSwitchToLoginClicked;
 
@@ -31,18 +33,21 @@ public class RegistrationUIHandler : MonoBehaviour
 
     private void SetupEventListeners()
     {
-        registerButton?.onClick.AddListener(() => OnRegistrationRequested?.Invoke(nameInputField.text.Trim(), regEmailInputField.text.Trim(), regPasswordInputField.text));
+        // ★変更: usernameInputFieldの値を使用
+        registerButton?.onClick.AddListener(() => OnRegistrationRequested?.Invoke(usernameInputField.text.Trim(), regEmailInputField.text.Trim(), regPasswordInputField.text));
         switchToLoginButton?.onClick.AddListener(() => OnSwitchToLoginClicked?.Invoke());
 
-        nameInputField?.onValueChanged.AddListener(OnNameChanged);
+        // ★変更: NameからUsernameのリスナーに変更
+        usernameInputField?.onValueChanged.AddListener(OnUsernameChanged);
         regEmailInputField?.onValueChanged.AddListener(OnRegEmailChanged);
         regPasswordInputField?.onValueChanged.AddListener(OnRegPasswordChanged);
     }
 
-    private void OnNameChanged(string value)
+    // ★変更: OnNameChangedからOnUsernameChangedに名称変更
+    private void OnUsernameChanged(string value)
     {
         HideRegistrationError();
-        ValidateNameRealtime();
+        ValidateUsernameRealtime();
         UpdateRegisterButton();
     }
 
@@ -59,26 +64,27 @@ public class RegistrationUIHandler : MonoBehaviour
         UpdateRegisterButton();
     }
 
-    private void ValidateNameRealtime()
+    // ★変更: ValidateNameRealtimeからValidateUsernameRealtimeに名称変更し、メッセージを修正
+    private void ValidateUsernameRealtime()
     {
-        if (nameHintText == null || nameInputField == null) return;
-        string name = nameInputField.text;
-        int length = name.Length;
+        if (usernameHintText == null || usernameInputField == null) return;
+        string username = usernameInputField.text;
+        int length = username.Length;
 
-        if (length == 0) nameHintText.gameObject.SetActive(false);
+        if (length == 0) usernameHintText.gameObject.SetActive(false);
         else if (length < 2)
         {
-            nameHintText.gameObject.SetActive(true);
-            nameHintText.text = "名前は2文字以上で入力してください。";
-            nameHintText.color = Color.red;
+            usernameHintText.gameObject.SetActive(true);
+            usernameHintText.text = "ユーザー名は2文字以上で入力してください。";
+            usernameHintText.color = Color.red;
         }
         else if (length > 20)
         {
-            nameHintText.gameObject.SetActive(true);
-            nameHintText.text = "名前は20文字以内で入力してください。";
-            nameHintText.color = Color.red;
+            usernameHintText.gameObject.SetActive(true);
+            usernameHintText.text = "ユーザー名は20文字以内で入力してください。";
+            usernameHintText.color = Color.red;
         }
-        else nameHintText.gameObject.SetActive(false);
+        else usernameHintText.gameObject.SetActive(false);
     }
 
     private void ValidateRegPasswordRealtime()
@@ -98,10 +104,12 @@ public class RegistrationUIHandler : MonoBehaviour
     public void UpdateRegisterButton()
     {
         if (registerButton == null) return;
-        bool isNameValid = nameInputField != null && nameInputField.text.Length >= 2 && nameInputField.text.Length <= 20;
-        bool isEmailValid = regEmailInputField != null && AuthUtils.IsValidEmail(regEmailInputField.text);
+        // ★変更: isNameValidからisUsernameValidに名称変更
+        bool isUsernameValid = usernameInputField != null && usernameInputField.text.Length >= 2 && usernameInputField.text.Length <= 20;
+        // AuthUtils.IsValidEmailを使用するには、AuthUtils.csがプロジェクトに存在する必要があります
+        bool isEmailValid = regEmailInputField != null && regEmailInputField.text.Contains("@");
         bool isPasswordValid = regPasswordInputField != null && regPasswordInputField.text.Length >= 6;
-        registerButton.interactable = isNameValid && isEmailValid && isPasswordValid;
+        registerButton.interactable = isUsernameValid && isEmailValid && isPasswordValid;
     }
 
     public void ShowRegistrationError(string message)
@@ -122,7 +130,8 @@ public class RegistrationUIHandler : MonoBehaviour
         if (hideErrorCoroutine != null) StopCoroutine(hideErrorCoroutine);
     }
 
-    private IEnumerator HideErrorAfterDelay(float delay)
+    // ★変更: publicに変更して外部から呼び出せるようにする
+    public IEnumerator HideErrorAfterDelay(float delay)
     {
         yield return new WaitForSeconds(delay);
         HideRegistrationError();

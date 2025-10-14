@@ -7,7 +7,7 @@ using System.Collections;
 public class LoginUIHandler : MonoBehaviour
 {
     [Header("ログインUI")]
-    public TMP_InputField loginEmailInputField;
+    public TMP_InputField loginUsernameInputField;
     public TMP_InputField loginPasswordInputField;
     public Button loginButton;
     public Button forgotPasswordButton;
@@ -16,11 +16,8 @@ public class LoginUIHandler : MonoBehaviour
 
     // イベントデリゲートを定義
     public event Action<string, string> OnLoginRequested;
-    public event Action<string> OnForgotPasswordRequested;
+    public event Action OnForgotPasswordClicked; // ★変更: 引数なしのイベントに変更
     public event Action OnSwitchToRegisterClicked;
-
-    // ★変更点: コルーチンの管理はIntegratedAuthManagerに任せるため不要に
-    // private Coroutine hideErrorCoroutine;
 
     void Awake()
     {
@@ -29,22 +26,18 @@ public class LoginUIHandler : MonoBehaviour
         UpdateLoginButton();
     }
 
-    private void OnEnable()
-    {
-        RestoreRememberedEmail();
-    }
-
     private void SetupEventListeners()
     {
-        loginButton?.onClick.AddListener(() => OnLoginRequested?.Invoke(loginEmailInputField.text.Trim(), loginPasswordInputField.text));
-        forgotPasswordButton?.onClick.AddListener(() => OnForgotPasswordRequested?.Invoke(loginEmailInputField.text.Trim()));
+        loginButton?.onClick.AddListener(() => OnLoginRequested?.Invoke(loginUsernameInputField.text.Trim(), loginPasswordInputField.text));
+        // ★変更: パスワード忘れボタンはクリックイベントを通知するだけ
+        forgotPasswordButton?.onClick.AddListener(() => OnForgotPasswordClicked?.Invoke());
         switchToRegisterButton?.onClick.AddListener(() => OnSwitchToRegisterClicked?.Invoke());
 
-        loginEmailInputField?.onValueChanged.AddListener(OnEmailChanged);
+        loginUsernameInputField?.onValueChanged.AddListener(OnUsernameChanged);
         loginPasswordInputField?.onValueChanged.AddListener(OnPasswordChanged);
     }
 
-    private void OnEmailChanged(string value)
+    private void OnUsernameChanged(string value)
     {
         HideLoginError();
         UpdateLoginButton();
@@ -59,31 +52,18 @@ public class LoginUIHandler : MonoBehaviour
     public void UpdateLoginButton()
     {
         if (loginButton == null) return;
-        // AuthUtils.IsValidEmailを使用するには、AuthUtils.csがプロジェクトに存在する必要があります
-        bool isEmailValid = loginEmailInputField != null && loginEmailInputField.text.Contains("@");
-        bool isPasswordValid = loginPasswordInputField != null && !string.IsNullOrEmpty(loginPasswordInputField.text);
-        loginButton.interactable = isEmailValid && isPasswordValid;
-    }
 
-    public void RestoreRememberedEmail()
-    {
-        if (AuthenticationManager.Instance != null)
-        {
-            string rememberedEmail = AuthenticationManager.Instance.GetRememberedEmail();
-            if (!string.IsNullOrEmpty(rememberedEmail) && loginEmailInputField != null)
-            {
-                loginEmailInputField.text = rememberedEmail;
-            }
-        }
+        bool isUsernameValid = loginUsernameInputField != null && !string.IsNullOrEmpty(loginUsernameInputField.text);
+        bool isPasswordValid = loginPasswordInputField != null && !string.IsNullOrEmpty(loginPasswordInputField.text);
+        loginButton.interactable = isUsernameValid && isPasswordValid;
     }
 
     public void ClearInputFields()
     {
-        if (loginEmailInputField != null) loginEmailInputField.text = "";
+        if (loginUsernameInputField != null) loginUsernameInputField.text = "";
         if (loginPasswordInputField != null) loginPasswordInputField.text = "";
     }
 
-    // ★変更点: コルーチン開始のコードを削除
     public void ShowLoginError(string message)
     {
         if (loginErrorText != null)
@@ -94,7 +74,6 @@ public class LoginUIHandler : MonoBehaviour
         }
     }
 
-    // ★変更点: コルーチン開始のコードを削除
     public void ShowLoginSuccess(string message)
     {
         if (loginErrorText != null)
@@ -110,7 +89,6 @@ public class LoginUIHandler : MonoBehaviour
         if (loginErrorText != null) loginErrorText.gameObject.SetActive(false);
     }
 
-    // ★変更点: IntegratedAuthManagerから呼び出せるようにpublicに変更
     public IEnumerator HideErrorAfterDelay(float delay)
     {
         yield return new WaitForSeconds(delay);

@@ -111,7 +111,7 @@ public class DatabaseManager
         Debug.Log($"データベースのパス: {dbPath}");
     }
 
-    // ----- 基本的なデータ操作メソッド -----
+    // ----- ユーザー関連メソッド -----
 
     public void SaveUser(User user)
     {
@@ -122,6 +122,33 @@ public class DatabaseManager
     {
         return _connection.Find<User>(userId);
     }
+
+    // ★★★ ここから2つのメソッドを追加 ★★★
+
+    /// <summary>
+    /// 指定されたユーザー名を持つユーザーのメールアドレスを取得します。
+    /// </summary>
+    /// <returns>見つかった場合はメールアドレス、見つからなければnullを返します。</returns>
+    public string GetEmailFromUsername(string username)
+    {
+        // 大文字・小文字を区別しないように検索するのが一般的です
+        var user = _connection.Table<User>().FirstOrDefault(u => u.Name.ToLower() == username.ToLower());
+        return user?.GmailAddress;
+    }
+
+    /// <summary>
+    /// 指定されたユーザー名が既にデータベースに存在するかを確認します。
+    /// </summary>
+    public bool DoesUsernameExist(string username)
+    {
+        // 大文字・小文字を区別しないように検索
+        var count = _connection.Table<User>().Count(u => u.Name.ToLower() == username.ToLower());
+        return count > 0;
+    }
+
+    // ★★★ ここまで ★★★
+
+    // ----- モノと特徴の関連メソッド -----
 
     public void SaveObjectWithFeatures(ObjectItem item, List<string> featureNames)
     {
@@ -158,14 +185,14 @@ public class DatabaseManager
         if (item == null) return null;
 
         var featureIds = _connection.Table<ObjectFeature>()
-                                    .Where(of => of.object_id == objectId)
-                                    .Select(of => of.feature_id)
-                                    .ToList();
+                                        .Where(of => of.object_id == objectId)
+                                        .Select(of => of.feature_id)
+                                        .ToList();
         if (featureIds.Any())
         {
             item.Features = _connection.Table<Feature>()
-                                       .Where(f => featureIds.Contains(f.feature_id))
-                                       .ToList();
+                                        .Where(f => featureIds.Contains(f.feature_id))
+                                        .ToList();
         }
         return item;
     }
@@ -195,7 +222,7 @@ public class DatabaseManager
         return feature;
     }
 
-    // ===== ここから下が不足しているメソッド群です =====
+    // ----- デバッグ・管理用メソッド -----
 
     public List<User> GetAllUsers()
     {
@@ -246,21 +273,13 @@ public class DatabaseManager
         }
     }
 
-    /// <summary>
-    /// 指定されたIDのオブジェクトを、関連データも含めてDBから削除します。
-    /// </summary>
-    /// <param name="objectId">削除するオブジェクトのID</param>
     public void DeleteObject(string objectId)
     {
         _connection.BeginTransaction();
         try
         {
-            // 1. オブジェクトと特徴の関連テーブルから削除
             _connection.Table<ObjectFeature>().Delete(of => of.object_id == objectId);
-
-            // 2. オブジェクト本体をテーブルから削除
             _connection.Delete<ObjectItem>(objectId);
-
             _connection.Commit();
             Debug.Log($"オブジェクト(ID: {objectId})をデータベースから削除しました。");
         }
