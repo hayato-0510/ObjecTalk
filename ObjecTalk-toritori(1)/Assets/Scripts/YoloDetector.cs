@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -6,6 +6,14 @@ using UnityEngine.UI;
 using Unity.Sentis;
 using TMPro;
 using FF = Unity.Sentis.Functional;
+
+// æ¤œå‡ºãƒ¢ãƒ¼ãƒ‰ã®åˆ—æŒ™å‹ï¼ˆã‚¯ãƒ©ã‚¹ã®å¤–ã§å®šç¾©ï¼‰
+public enum DetectionMode
+{
+    EveryNFrames,   // N ãƒ•ãƒ¬ãƒ¼ãƒ ã”ã¨
+    EveryNSeconds,  // N ç§’ã”ã¨
+    Manual          // æ‰‹å‹•ãƒˆãƒªã‚¬ãƒ¼
+}
 
 public class RealtimeYoloDetector : MonoBehaviour
 {
@@ -19,14 +27,19 @@ public class RealtimeYoloDetector : MonoBehaviour
     [SerializeField, Range(0, 1)] private float scoreThreshold = 0.5f;
     [SerializeField, Range(0, 1)] private float iouThreshold = 0.45f;
 
+    [Header("Detection Frequency")]
+    [SerializeField] private DetectionMode detectionMode = DetectionMode.EveryNFrames;
+    [SerializeField, Range(1, 30)] private int frameInterval = 3; // N ãƒ•ãƒ¬ãƒ¼ãƒ ã”ã¨ã«æ¤œå‡º
+    [SerializeField, Range(0.1f, 5f)] private float timeInterval = 0.5f; // N ç§’ã”ã¨ã«æ¤œå‡ºï¼ˆç§’å˜ä½ï¼‰
+
     [Header("UI")]
     [SerializeField] private RawImage rawImage;
     [SerializeField] private AspectRatioFitter fit;
     [SerializeField] private GameObject boxPrefab;
 
     [Header("Debug Settings")]
-    [SerializeField] private bool enableConsoleOutput = true;
-    [SerializeField] private bool showDetailedInfo = true;
+    [SerializeField] private bool enableConsoleOutput = false; // ãƒ‡ãƒ•ã‚©ãƒ«ãƒˆã§ã‚ªãƒ•
+    [SerializeField] private bool showDetailedInfo = false;
 
     // --- Private members ---
     private string[] labels;
@@ -35,6 +48,14 @@ public class RealtimeYoloDetector : MonoBehaviour
     private bool isDetecting = false;
     private bool isInitialized = false;
     private int frameCount = 0;
+    private float lastDetectionTime = 0f;
+
+    // æœ€é©åŒ–ç”¨ã®ã‚­ãƒ£ãƒƒã‚·ãƒ¥
+    private RenderTexture persistentRenderTexture;
+    private Texture2D persistentTexture2D;
+    private List<BoundingBox> cachedDetections = new List<BoundingBox>();
+    private Stack<GameObject> boxPool = new Stack<GameObject>();
+    private List<GameObject> activeBoxes = new List<GameObject>();
 
     void Start()
     {
@@ -47,12 +68,25 @@ public class RealtimeYoloDetector : MonoBehaviour
         if (isInitialized)
         {
             yield return StartCoroutine(InitializeCamera());
+            InitializeBoxPool();
+        }
+    }
+
+    // ãƒœãƒƒã‚¯ã‚¹ãƒ—ãƒ¼ãƒ«ã‚’äº‹å‰ã«ä½œæˆ
+    void InitializeBoxPool()
+    {
+        if (boxPrefab == null || rawImage?.transform == null) return;
+
+        for (int i = 0; i < 20; i++) // æœ€å¤§20å€‹ã®ãƒœãƒƒã‚¯ã‚¹ã‚’äº‹å‰ç”Ÿæˆ
+        {
+            GameObject box = Instantiate(boxPrefab, rawImage.transform);
+            box.SetActive(false);
+            boxPool.Push(box);
         }
     }
 
     IEnumerator InitializeEngine()
     {
-        // 1. ƒ‰ƒxƒ‹‚ğ“Ç‚İ‚Ş
         if (labelsAsset == null)
         {
             Debug.LogError("Labels asset is null!");
@@ -61,7 +95,6 @@ public class RealtimeYoloDetector : MonoBehaviour
         }
 
         labels = labelsAsset.text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-        Debug.Log($"Loaded {labels.Length} labels");
 
         if (modelAsset == null)
         {
@@ -70,7 +103,6 @@ public class RealtimeYoloDetector : MonoBehaviour
             yield break;
         }
 
-        // 2. ƒ‚ƒfƒ‹‚ğƒ[ƒh‚µAŒãˆ—‚ğ‘g‚İ‚Ş
         var model = ModelLoader.Load(modelAsset);
         if (model == null)
         {
@@ -107,7 +139,6 @@ public class RealtimeYoloDetector : MonoBehaviour
             var finalScores = FF.Gather(scores, 0, indices);
             var finalClassIDs = FF.Gather(classIDs, 0, indices);
 
-            // 3. ÅI“I‚Èƒ‚ƒfƒ‹‚ğƒRƒ“ƒpƒCƒ‹‚µAWorker‚ğì¬
             model = graph.Compile(finalBoxes, finalScores, finalClassIDs);
             engine = new Worker(model, BackendType.GPUCompute);
 
@@ -121,7 +152,6 @@ public class RealtimeYoloDetector : MonoBehaviour
         }
         finally
         {
-            // centersToCornersTensor‚ğ”jŠü
             centersToCornersTensor?.Dispose();
         }
     }
@@ -135,7 +165,8 @@ public class RealtimeYoloDetector : MonoBehaviour
             yield break;
         }
 
-        cameraTexture = new WebCamTexture(devices[0].name, 1280, 720);
+        // è§£åƒåº¦ã‚’ä¸‹ã’ã‚‹ã“ã¨ã§ãƒ‘ãƒ•ã‚©ãƒ¼ãƒãƒ³ã‚¹å‘ä¸Š
+        cameraTexture = new WebCamTexture(devices[0].name, 1280, 720, 30);
         cameraTexture.Play();
 
         yield return new WaitUntil(() => cameraTexture.width > 100);
@@ -143,6 +174,11 @@ public class RealtimeYoloDetector : MonoBehaviour
         if (rawImage != null)
         {
             rawImage.texture = cameraTexture;
+
+            // æ°¸ç¶šçš„ãªRenderTextureã¨Texture2Dã‚’ä½œæˆ
+            persistentRenderTexture = new RenderTexture(netWidth, netHeight, 0, RenderTextureFormat.ARGB32);
+            persistentTexture2D = new Texture2D(netWidth, netHeight, TextureFormat.RGB24, false);
+
             Debug.Log("Camera initialized successfully");
         }
         else
@@ -159,15 +195,43 @@ public class RealtimeYoloDetector : MonoBehaviour
             return;
         }
 
+        // æ¤œå‡ºé »åº¦ã®ãƒã‚§ãƒƒã‚¯
+        bool shouldDetect = false;
+
+        switch (detectionMode)
+        {
+            case DetectionMode.EveryNFrames:
+                frameCount++;
+                shouldDetect = (frameCount % frameInterval == 0);
+                break;
+
+            case DetectionMode.EveryNSeconds:
+                float currentTime = Time.time;
+                if (currentTime - lastDetectionTime >= timeInterval)
+                {
+                    shouldDetect = true;
+                    lastDetectionTime = currentTime;
+                }
+                break;
+
+            case DetectionMode.Manual:
+                // æ‰‹å‹•ãƒ¢ãƒ¼ãƒ‰ - å¤–éƒ¨ã‹ã‚‰åˆ¶å¾¡
+                shouldDetect = false;
+                break;
+        }
+
+        if (!shouldDetect)
+        {
+            return;
+        }
+
         try
         {
-            // ‰æ–Ê‚ÌŒü‚«‚âƒAƒXƒyƒNƒg”ä‚ğ’²®
             fit.aspectRatio = (float)cameraTexture.width / cameraTexture.height;
             float scaleY = cameraTexture.videoVerticallyMirrored ? -1f : 1f;
             rawImage.rectTransform.localScale = new Vector3(1f, scaleY, 1f);
             rawImage.rectTransform.localEulerAngles = new Vector3(0, 0, -cameraTexture.videoRotationAngle);
 
-            // ŒŸo‚ğÀs
             StartCoroutine(RunDetection());
         }
         catch (Exception e)
@@ -179,7 +243,6 @@ public class RealtimeYoloDetector : MonoBehaviour
     IEnumerator RunDetection()
     {
         isDetecting = true;
-        frameCount++;
 
         Tensor<float> inputTensor = null;
         Tensor<float> outputBoxes = null;
@@ -188,13 +251,11 @@ public class RealtimeYoloDetector : MonoBehaviour
 
         bool hasError = false;
 
-        // --- Input tensor creation ---
         if (!hasError)
         {
             try
             {
-                // V‚µ‚¢TextureToTensorƒƒ\ƒbƒh‚ğg—p
-                inputTensor = TextureToTensor(cameraTexture, netWidth, netHeight);
+                inputTensor = TextureToTensorOptimized(cameraTexture);
                 engine.Schedule(inputTensor);
             }
             catch (Exception e)
@@ -204,13 +265,11 @@ public class RealtimeYoloDetector : MonoBehaviour
             }
         }
 
-        // „˜_Š®—¹‚ğ‘Ò‹@
         if (!hasError)
         {
             yield return new WaitForEndOfFrame();
         }
 
-        // --- Output processing ---
         if (!hasError)
         {
             try
@@ -226,20 +285,18 @@ public class RealtimeYoloDetector : MonoBehaviour
                 }
                 else
                 {
-                    // CPU‘¤‚Éƒf[ƒ^‚ğƒRƒs[‚µ‚Ä“Ç‚İæ‚è‰Â”\‚É‚·‚é
                     outputBoxes = rawOutputBoxes.ReadbackAndClone();
                     outputScores = rawOutputScores.ReadbackAndClone();
                     outputLabels = rawOutputLabels.ReadbackAndClone();
 
-                    var detectionResults = ProcessDetections(outputBoxes, outputScores, outputLabels);
+                    cachedDetections = ProcessDetections(outputBoxes, outputScores, outputLabels);
 
-                    // ƒRƒ“ƒ\[ƒ‹o—Í‚ğ’Ç‰Á
-                    if (enableConsoleOutput)
+                    if (enableConsoleOutput && cachedDetections.Count > 0)
                     {
-                        LogDetectionResults(detectionResults);
+                        LogDetectionResults(cachedDetections);
                     }
 
-                    DrawBoundingBoxes(detectionResults);
+                    DrawBoundingBoxesOptimized(cachedDetections);
                 }
             }
             catch (Exception e)
@@ -249,7 +306,6 @@ public class RealtimeYoloDetector : MonoBehaviour
             }
         }
 
-        // --- Cleanup ---
         try
         {
             inputTensor?.Dispose();
@@ -265,25 +321,18 @@ public class RealtimeYoloDetector : MonoBehaviour
         isDetecting = false;
     }
 
-    // ŒŸoŒ‹‰Ê‚ğƒRƒ“ƒ\[ƒ‹‚Éo—Í‚·‚éV‚µ‚¢ƒƒ\ƒbƒh
     void LogDetectionResults(List<BoundingBox> detectionResults)
     {
-        if (detectionResults.Count == 0)
-        {
-            // ‰½‚àŒŸo‚³‚ê‚È‚©‚Á‚½ê‡‚Ío—Í‚µ‚È‚¢iƒXƒpƒ€–h~j
-            return;
-        }
+        if (detectionResults.Count == 0) return;
 
         System.Text.StringBuilder logMessage = new System.Text.StringBuilder();
-        logMessage.AppendLine($"=== Frame {frameCount} - ŒŸo‚³‚ê‚½•¨‘Ì: {detectionResults.Count}ŒÂ ===");
+        logMessage.AppendLine($"=== Frame {frameCount} - æ¤œå‡º: {detectionResults.Count}å€‹ ===");
 
-        // •¨‘Ì‚Ìí—Ş‚ğƒJƒEƒ“ƒg
         Dictionary<string, int> objectCounts = new Dictionary<string, int>();
         Dictionary<string, float> maxScores = new Dictionary<string, float>();
 
         foreach (var detection in detectionResults)
         {
-            // ƒJƒEƒ“ƒg
             if (objectCounts.ContainsKey(detection.Label))
             {
                 objectCounts[detection.Label]++;
@@ -293,83 +342,60 @@ public class RealtimeYoloDetector : MonoBehaviour
                 objectCounts[detection.Label] = 1;
             }
 
-            // Å‚ƒXƒRƒA‚ğ‹L˜^
             if (!maxScores.ContainsKey(detection.Label) || detection.Score > maxScores[detection.Label])
             {
                 maxScores[detection.Label] = detection.Score;
             }
 
-            // Ú×î•ñ‚ğ•\¦‚·‚éê‡
             if (showDetailedInfo)
             {
-                logMessage.AppendLine($"  ? {detection.Label}: {detection.Score:P1} " +
-                                    $"(ˆÊ’u: {detection.CenterX:F0}, {detection.CenterY:F0}, " +
-                                    $"ƒTƒCƒY: {detection.Width:F0}~{detection.Height:F0})");
+                logMessage.AppendLine($"  â€¢ {detection.Label}: {detection.Score:P1} " +
+                                    $"(ä½ç½®: {detection.CenterX:F0}, {detection.CenterY:F0}, " +
+                                    $"ã‚µã‚¤ã‚º: {detection.Width:F0}Ã—{detection.Height:F0})");
             }
         }
 
-        // ƒTƒ}ƒŠ[î•ñ
-        logMessage.AppendLine("--- ŒŸoƒTƒ}ƒŠ[ ---");
+        logMessage.AppendLine("--- ã‚µãƒãƒªãƒ¼ ---");
         foreach (var kvp in objectCounts)
         {
-            logMessage.AppendLine($"  {kvp.Key}: {kvp.Value}ŒÂ (Å‚M—Š“x: {maxScores[kvp.Key]:P1})");
+            logMessage.AppendLine($"  {kvp.Key}: {kvp.Value}å€‹ (æœ€é«˜: {maxScores[kvp.Key]:P1})");
         }
 
         Debug.Log(logMessage.ToString());
     }
 
-    // TextureConverter.ToTensor‚Ì‘ã‘ÖÀ‘•
-    Tensor<float> TextureToTensor(WebCamTexture texture, int width, int height)
+    // æœ€é©åŒ–ã•ã‚ŒãŸãƒ†ã‚¯ã‚¹ãƒãƒ£å¤‰æ›ï¼ˆå†åˆ©ç”¨å¯èƒ½ãªãƒªã‚½ãƒ¼ã‚¹ã‚’ä½¿ç”¨ï¼‰
+    Tensor<float> TextureToTensorOptimized(WebCamTexture texture)
     {
-        // RenderTexture‚ğg—p‚µ‚ÄƒeƒNƒXƒ`ƒƒ‚ğƒŠƒTƒCƒY
-        RenderTexture renderTexture = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
-        Graphics.Blit(texture, renderTexture);
+        // æ°¸ç¶šçš„ãªRenderTextureã‚’å†åˆ©ç”¨
+        Graphics.Blit(texture, persistentRenderTexture);
 
-        // RenderTexture‚©‚çƒsƒNƒZƒ‹ƒf[ƒ^‚ğæ“¾
-        RenderTexture.active = renderTexture;
-        Texture2D texture2D = new Texture2D(width, height, TextureFormat.RGB24, false);
-        texture2D.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-        texture2D.Apply();
+        RenderTexture.active = persistentRenderTexture;
+        persistentTexture2D.ReadPixels(new Rect(0, 0, netWidth, netHeight), 0, 0, false);
+        persistentTexture2D.Apply(false);
         RenderTexture.active = null;
 
-        // ƒsƒNƒZƒ‹ƒf[ƒ^‚ğæ“¾
-        Color32[] pixels = texture2D.GetPixels32();
+        Color32[] pixels = persistentTexture2D.GetPixels32();
+        float[] tensorData = new float[3 * netHeight * netWidth];
 
-        // ƒeƒ“ƒ\ƒ‹—p‚Ìƒf[ƒ^”z—ñ‚ğì¬ (NCHWŒ`®: [1, 3, height, width])
-        float[] tensorData = new float[1 * 3 * height * width];
-
-        for (int y = 0; y < height; y++)
+        // æœ€é©åŒ–ã•ã‚ŒãŸãƒ”ã‚¯ã‚»ãƒ«å‡¦ç†
+        int channelSize = netHeight * netWidth;
+        for (int i = 0; i < pixels.Length; i++)
         {
-            for (int x = 0; x < width; x++)
-            {
-                int pixelIndex = y * width + x;
-                Color32 pixel = pixels[pixelIndex];
-
-                // RGB’l‚ğ0-1‚Ì”ÍˆÍ‚É³‹K‰»‚µ‚Äƒeƒ“ƒ\ƒ‹‚ÉŠi”[
-                int baseIndex = y * width + x;
-                tensorData[0 * height * width + baseIndex] = pixel.r / 255.0f; // R ƒ`ƒƒƒ“ƒlƒ‹
-                tensorData[1 * height * width + baseIndex] = pixel.g / 255.0f; // G ƒ`ƒƒƒ“ƒlƒ‹
-                tensorData[2 * height * width + baseIndex] = pixel.b / 255.0f; // B ƒ`ƒƒƒ“ƒlƒ‹
-            }
+            Color32 pixel = pixels[i];
+            tensorData[i] = pixel.r / 255.0f;
+            tensorData[channelSize + i] = pixel.g / 255.0f;
+            tensorData[2 * channelSize + i] = pixel.b / 255.0f;
         }
 
-        // ƒŠƒ\[ƒX‚ğ‰ğ•ú
-        RenderTexture.ReleaseTemporary(renderTexture);
-        DestroyImmediate(texture2D);
-
-        // ƒeƒ“ƒ\ƒ‹‚ğì¬‚µ‚Ä•Ô‚·
-        return new Tensor<float>(new TensorShape(1, 3, height, width), tensorData);
+        return new Tensor<float>(new TensorShape(1, 3, netHeight, netWidth), tensorData);
     }
 
     List<BoundingBox> ProcessDetections(Tensor<float> outputBoxes, Tensor<float> outputScores, Tensor<int> outputLabels)
     {
         var detectionResults = new List<BoundingBox>();
 
-        if (rawImage?.rectTransform == null)
-        {
-            Debug.LogError("RawImage or its RectTransform is null!");
-            return detectionResults;
-        }
+        if (rawImage?.rectTransform == null) return detectionResults;
 
         float scaleX = rawImage.rectTransform.rect.width / netWidth;
         float scaleY = rawImage.rectTransform.rect.height / netHeight;
@@ -384,10 +410,8 @@ public class RealtimeYoloDetector : MonoBehaviour
             {
                 int labelIndex = outputLabels[i];
 
-                // ƒ‰ƒxƒ‹ƒCƒ“ƒfƒbƒNƒX‚Ì”ÍˆÍƒ`ƒFƒbƒN
                 if (labels == null || labelIndex < 0 || labelIndex >= labels.Length)
                 {
-                    Debug.LogWarning($"Invalid label index: {labelIndex}, labels array length: {labels?.Length}");
                     continue;
                 }
 
@@ -416,74 +440,61 @@ public class RealtimeYoloDetector : MonoBehaviour
         return detectionResults;
     }
 
-    // Œ‹‰Ê‚ğ•`‰æ‚·‚é
-    void DrawBoundingBoxes(List<BoundingBox> boxes)
+    // ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆãƒ—ãƒ¼ãƒ«ã‚’ä½¿ç”¨ã—ãŸæœ€é©åŒ–ã•ã‚ŒãŸæç”»
+    void DrawBoundingBoxesOptimized(List<BoundingBox> boxes)
     {
         try
         {
-            // nullƒ`ƒFƒbƒN‚ğ’Ç‰Á
-            if (rawImage?.transform == null)
-            {
-                Debug.LogError("RawImage or its transform is null!");
-                return;
-            }
+            if (rawImage?.transform == null || boxPrefab == null) return;
 
-            if (boxPrefab == null)
+            // æ—¢å­˜ã®ã‚¢ã‚¯ãƒ†ã‚£ãƒ–ãƒœãƒƒã‚¯ã‚¹ã‚’ãƒ—ãƒ¼ãƒ«ã«æˆ»ã™
+            foreach (var box in activeBoxes)
             {
-                Debug.LogError("BoxPrefab is null!");
-                return;
-            }
-
-            // Šù‘¶‚Ìƒ{ƒbƒNƒX‚ğíœ
-            foreach (Transform child in rawImage.transform)
-            {
-                if (child != null)
+                if (box != null)
                 {
-                    Destroy(child.gameObject);
+                    box.SetActive(false);
+                    boxPool.Push(box);
                 }
             }
+            activeBoxes.Clear();
 
-            // V‚µ‚¢ƒ{ƒbƒNƒX‚ğì¬
+            // æ–°ã—ã„ãƒœãƒƒã‚¯ã‚¹ã‚’ä½œæˆã¾ãŸã¯å†åˆ©ç”¨
             foreach (var box in boxes)
             {
-                try
+                GameObject boxObj;
+
+                if (boxPool.Count > 0)
                 {
-                    GameObject newBox = Instantiate(boxPrefab, rawImage.transform);
-                    if (newBox == null) continue;
+                    boxObj = boxPool.Pop();
+                }
+                else
+                {
+                    boxObj = Instantiate(boxPrefab, rawImage.transform);
+                }
 
-                    var rt = newBox.GetComponent<RectTransform>();
-                    var text = newBox.GetComponentInChildren<TextMeshProUGUI>();
+                if (boxObj == null) continue;
 
-                    if (rt == null)
-                    {
-                        Debug.LogError("RectTransform component not found in boxPrefab!");
-                        Destroy(newBox);
-                        continue;
-                    }
+                var rt = boxObj.GetComponent<RectTransform>();
+                var text = boxObj.GetComponentInChildren<TextMeshProUGUI>();
 
+                if (rt != null)
+                {
                     rt.localPosition = new Vector3(box.CenterX, -box.CenterY, 0);
                     rt.sizeDelta = new Vector2(box.Width, box.Height);
-
-                    if (text != null)
-                    {
-                        text.text = $"{box.Label} ({box.Score:P0})";
-                    }
-                    else
-                    {
-                        Debug.LogWarning("Text component not found in boxPrefab!");
-                    }
-
-                    newBox.SetActive(true);
                 }
-                catch (Exception e)
+
+                if (text != null)
                 {
-                    Debug.LogError($"Error creating bounding box: {e.Message}");
+                    text.text = $"{box.Label} ({box.Score:P0})";
                 }
+
+                boxObj.SetActive(true);
+                activeBoxes.Add(boxObj);
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error in DrawBoundingBoxes: {e.Message}");
+            Debug.LogError($"Error in DrawBoundingBoxesOptimized: {e.Message}");
         }
     }
 
@@ -493,20 +504,65 @@ public class RealtimeYoloDetector : MonoBehaviour
         {
             isInitialized = false;
             engine?.Dispose();
+
             if (cameraTexture != null)
             {
                 cameraTexture.Stop();
                 cameraTexture = null;
             }
+
+            // æ°¸ç¶šãƒªã‚½ãƒ¼ã‚¹ã®è§£æ”¾
+            if (persistentRenderTexture != null)
+            {
+                persistentRenderTexture.Release();
+                Destroy(persistentRenderTexture);
+            }
+
+            if (persistentTexture2D != null)
+            {
+                Destroy(persistentTexture2D);
+            }
+
+            // ãƒ—ãƒ¼ãƒ«å†…ã®ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã‚’ç ´æ£„
+            foreach (var box in boxPool)
+            {
+                if (box != null) Destroy(box);
+            }
+            boxPool.Clear();
+
+            foreach (var box in activeBoxes)
+            {
+                if (box != null) Destroy(box);
+            }
+            activeBoxes.Clear();
         }
         catch (Exception e)
         {
             Debug.LogError($"Error in OnDestroy: {e.Message}");
         }
     }
+
+    // æ‰‹å‹•ã§æ¤œå‡ºã‚’å®Ÿè¡Œã™ã‚‹ãŸã‚ã®ãƒ‘ãƒ–ãƒªãƒƒã‚¯ãƒ¡ã‚½ãƒƒãƒ‰
+    public void TriggerDetection()
+    {
+        if (detectionMode == DetectionMode.Manual && !isDetecting && isInitialized)
+        {
+            StartCoroutine(RunDetection());
+        }
+    }
+
+    // æ¤œå‡ºãƒ¢ãƒ¼ãƒ‰ã‚’å®Ÿè¡Œæ™‚ã«å¤‰æ›´
+    public void SetDetectionMode(DetectionMode mode)
+    {
+        detectionMode = mode;
+        if (mode == DetectionMode.EveryNSeconds)
+        {
+            lastDetectionTime = Time.time;
+        }
+    }
 }
 
-// Bounding Boxƒf[ƒ^\‘¢
+// Bounding Boxãƒ‡ãƒ¼ã‚¿æ§‹é€ 
 public struct BoundingBox
 {
     public float CenterX;

@@ -563,15 +563,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 35b100a4bec10eb4d9d3d35375397383, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  modelAsset: {fileID: 5022602860645237092, guid: f009573c1b0813d49b0413cf7df47ec6, type: 3}
+  modelAsset: {fileID: 5022602860645237092, guid: 5c91b84725b5e4047b716dd90c9db4a5, type: 3}
   labelsAsset: {fileID: 4900000, guid: 26163da17193b4d48b7d5e975bf06279, type: 3}
   netWidth: 640
   netHeight: 640
-  scoreThreshold: 0.5
-  iouThreshold: 0.45
+  scoreThreshold: 0.24
+  iouThreshold: 0.235
+  detectionMode: 1
+  frameInterval: 11
+  timeInterval: 2.06
   rawImage: {fileID: 815141321}
   fit: {fileID: 815141320}
-  boxPrefab: {fileID: 5001953594126917741, guid: c66cef3e8a250194fb662d3c880bbef7, type: 3}
+  boxPrefab: {fileID: 0}
+  enableConsoleOutput: 1
+  showDetailedInfo: 1
 --- !u!1 &815141318
 GameObject:
   m_ObjectHideFlags: 0

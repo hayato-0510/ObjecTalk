@@ -1,2 +1,16 @@
 fileFormatVersion: 2
 guid: 35b100a4bec10eb4d9d3d35375397383
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - modelAsset: {instanceID: 0}
+  - labelsAsset: {instanceID: 0}
+  - rawImage: {instanceID: 0}
+  - fit: {instanceID: 0}
+  - boxPrefab: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
