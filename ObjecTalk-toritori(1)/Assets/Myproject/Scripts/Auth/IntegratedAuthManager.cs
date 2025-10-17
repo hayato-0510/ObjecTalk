@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections;
 using Firebase.Auth;
+using UnityEngine.SceneManagement;
 
 public class IntegratedAuthManager : MonoBehaviour
 {
@@ -300,13 +301,31 @@ public class IntegratedAuthManager : MonoBehaviour
     private void OnSessionExpired()
     {
         Debug.Log("セッションが期限切れです");
-        ShowPanel(loginUIHandler.gameObject);
-        loginUIHandler.ShowLoginError("セッションが期限切れです。再度ログインしてください。");
-        StartCoroutine(loginUIHandler.HideErrorAfterDelay(5f));
-        HideLoading();
         CurrentUser = null;
-    }
+        HideLoading(); // HideLoadingがUI操作を含む場合、これもnullチェックが必要かもしれません
 
+        // [修正案1]
+        // ログインUIハンドラがまだ存在する場合（稀ですが）
+        if (loginUIHandler != null)
+        {
+            ShowPanel(loginUIHandler.gameObject);
+            loginUIHandler.ShowLoginError("セッションが期限切れです。再度ログインしてください。");
+            StartCoroutine(loginUIHandler.HideErrorAfterDelay(5f));
+        }
+        // [修正案2]
+        // ログインUIハンドラが存在しない（＝ログイン画面以外の画面にいる）場合
+        else
+        {
+            // セッション切れの情報を PlayerPrefs などに一時保存
+            // これにより、ログイン画面がロードされた後にエラーメッセージを表示できる
+            PlayerPrefs.SetString("SessionErrorMessage", "セッションが期限切れです。再度ログインしてください。");
+            PlayerPrefs.Save();
+
+            // ログイン画面のシーン名（例: "LoginScene"）をロードする
+            // ※※※ ここの "LoginScene" はご自身のプロジェクトのシーン名に書き換えてください ※※※
+            SceneManager.LoadScene("LoginScene");
+        }
+    }
     private void OnAuthError(string errorMessage)
     {
         Debug.LogError($"認証エラー: {errorMessage}");

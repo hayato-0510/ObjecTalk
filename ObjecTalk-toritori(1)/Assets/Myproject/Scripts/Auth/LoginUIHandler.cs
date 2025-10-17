@@ -26,6 +26,25 @@ public class LoginUIHandler : MonoBehaviour
         UpdateLoginButton();
     }
 
+    // --- [ここから追加] ---
+    void Start()
+    {
+        // 別のシーンで保存されたセッション切れメッセージがないか確認
+        if (PlayerPrefs.HasKey("SessionErrorMessage"))
+        {
+            // メッセージを取得
+            string errorMessage = PlayerPrefs.GetString("SessionErrorMessage");
+
+            // すぐにキーを削除（リロード時に再度表示されるのを防ぐ）
+            PlayerPrefs.DeleteKey("SessionErrorMessage");
+
+            // ログインエラーとしてメッセージを表示
+            ShowLoginError(errorMessage);
+            StartCoroutine(HideErrorAfterDelay(5f)); // 5秒後に自動で消す
+        }
+    }
+    // --- [ここまで追加] ---
+
     private void SetupEventListeners()
     {
         loginButton?.onClick.AddListener(() => OnLoginRequested?.Invoke(loginUsernameInputField.text.Trim(), loginPasswordInputField.text));

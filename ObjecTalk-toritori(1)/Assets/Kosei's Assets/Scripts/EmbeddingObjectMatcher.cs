@@ -25,6 +25,7 @@ public class RegisteredObject
 
 public class EmbeddingObjectMatcher : MonoBehaviour
 {
+    // フロー変更: Recognition -> Placement -> Naming
     private enum AppMode { Recognition, Naming, Placement }
     private AppMode currentMode = AppMode.Recognition;
     private DatabaseManager dbManager;
@@ -45,10 +46,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     public Image snapshotDisplay_Naming;
     public Image snapshotDisplay_Placement;
     public Button registerStartButton;
-    public Button nextButton;
-    public Button confirmButton;
+    public Button nextButton; // Placement -> Naming へのボタン
+    public Button confirmButton; // Naming -> Register へのボタン
     public Button backButton;
     public TMP_InputField nameInputField;
+    public TMP_InputField categoryInputField; // <-- [変更] カテゴリ入力欄を追加
     public TMP_Text resultText;
 
     [Header("登録モード用UI")]
@@ -72,7 +74,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     private List<RegisteredObject> database = new List<RegisteredObject>();
     private Texture2D tempSnapshot;
-    private string tempObjectName;
+    // private string tempObjectName; // <-- [変更] 登録直前にInputFieldから読むため不要
     private int currentEyeId = -1;
     private int currentMouthId = -1;
 
@@ -102,8 +104,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         LoadRegisteredObjectsFromDatabase();
 
         registerStartButton.onClick.AddListener(OnRegisterStart);
-        nextButton.onClick.AddListener(OnNameConfirmed);
-        // confirmButtonはInspectorで設定
+        // nextButton.onClick.AddListener(OnNameConfirmed); // <-- [変更] 
+        nextButton.onClick.AddListener(OnPlacementConfirmed); // <-- [変更] Placement -> Naming への遷移
+        // confirmButtonはInspectorで設定 (OnConfirmRegistration)
         backButton.onClick.AddListener(OnBackButtonClicked);
         eyeToggle.onValueChanged.AddListener(OnCategoryChanged);
         mouthToggle.onValueChanged.AddListener(OnCategoryChanged);
@@ -130,7 +133,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     void OnDestroy()
     {
         if (registerStartButton != null) registerStartButton.onClick.RemoveListener(OnRegisterStart);
-        if (nextButton != null) nextButton.onClick.RemoveListener(OnNameConfirmed);
+        // if (nextButton != null) nextButton.onClick.RemoveListener(OnNameConfirmed); // <-- [変更]
+        if (nextButton != null) nextButton.onClick.RemoveListener(OnPlacementConfirmed); // <-- [変更]
         if (backButton != null) backButton.onClick.RemoveListener(OnBackButtonClicked);
         if (eyeToggle != null) eyeToggle.onValueChanged.RemoveListener(OnCategoryChanged);
         if (mouthToggle != null) mouthToggle.onValueChanged.RemoveListener(OnCategoryChanged);
@@ -142,18 +146,29 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     }
 
     #region Mode Switching
-    private void SwitchToNamingMode(Texture2D snapshot)
+    // [変更] NamingModeへの切り替え。スナップショットはtempSnapshotを流用
+    private void SwitchToNamingMode()
     {
         currentMode = AppMode.Naming;
-        var sprite = Sprite.Create(snapshot, new UnityEngine.Rect(0, 0, snapshot.width, snapshot.height), new Vector2(0.5f, 0.5f));
+        if (tempSnapshot == null)
+        {
+            Debug.LogError("Snapshot is missing!");
+            return;
+        }
+        var sprite = Sprite.Create(tempSnapshot, new UnityEngine.Rect(0, 0, tempSnapshot.width, tempSnapshot.height), new Vector2(0.5f, 0.5f));
         snapshotDisplay_Naming.sprite = sprite;
         uiManager.ShowPanel(namingPanel);
+
+        // 入力欄をクリア
+        nameInputField.text = "";
+        if (categoryInputField != null) categoryInputField.text = "";
     }
 
-    private void SwitchToPlacementMode()
+    // [変更] PlacementModeへの切り替え。スナップショットを引数で受け取る
+    private void SwitchToPlacementMode(Texture2D snapshot)
     {
         currentMode = AppMode.Placement;
-        snapshotDisplay_Placement.sprite = snapshotDisplay_Naming.sprite;
+        snapshotDisplay_Placement.sprite = Sprite.Create(snapshot, new UnityEngine.Rect(0, 0, snapshot.width, snapshot.height), new Vector2(0.5f, 0.5f));
         uiManager.ShowPanel(placementPanel);
         mouthToggle.isOn = false;
         eyeToggle.isOn = true;
@@ -179,6 +194,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         placementMouthImage.gameObject.SetActive(true);
     }
 
+    // [変更] 写真撮影時 (Recognition -> Placement)
     public void OnRegisterStart()
     {
         if (confirmButton != null)
@@ -188,41 +204,69 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         tempSnapshot = new Texture2D(webcamTexture.width, webcamTexture.height, TextureFormat.RGB24, false);
         tempSnapshot.SetPixels(webcamTexture.GetPixels());
         tempSnapshot.Apply();
-        SwitchToNamingMode(tempSnapshot);
+
+        // --- [変更] カメラを停止 ---
+        if (webcamTexture != null)
+        {
+            webcamTexture.Stop();
+        }
+        cameraDisplay.texture = null; // 表示をクリア
+        // ---------------------
+
+        // SwitchToNamingMode(tempSnapshot); // <-- 古い処理
+        SwitchToPlacementMode(tempSnapshot); // <-- [変更] PlacementModeへ
     }
 
-    public void OnNameConfirmed()
+    // [変更] OnNameConfirmed は削除し、OnPlacementConfirmed を新設
+    // (Placement -> Naming)
+    public void OnPlacementConfirmed()
     {
-        string objectName = nameInputField.text;
-        if (string.IsNullOrEmpty(objectName)) return;
-        tempObjectName = objectName;
-        SwitchToPlacementMode();
+        // パーツ配置完了後、名前入力画面へ
+        SwitchToNamingMode();
     }
 
+    // [変更] 戻るボタンのフローを変更
     public void OnBackButtonClicked()
     {
         if (currentMode == AppMode.Recognition)
         {
-            // ここにご自身のプロジェクトのホーム画面に戻る処理を記述
+            // ホーム画面に戻る処理 (変更なし)
             // 例: UnityEngine.SceneManagement.SceneManager.LoadScene("HomeScene");
         }
         else if (currentMode == AppMode.Naming)
         {
-            currentMode = AppMode.Recognition;
-            uiManager.ShowPanel(recognitionPanel);
+            // Naming -> Placement へ戻る
+            currentMode = AppMode.Placement;
+            uiManager.ShowPanel(placementPanel);
         }
         else if (currentMode == AppMode.Placement)
         {
-            currentMode = AppMode.Naming;
-            uiManager.ShowPanel(namingPanel);
+            // Placement -> Recognition へ戻る
+            currentMode = AppMode.Recognition;
+            uiManager.ShowPanel(recognitionPanel);
+
+            // --- [変更] カメラを再開 ---
+            if (webcamTexture != null && !webcamTexture.isPlaying)
+            {
+                webcamTexture.Play();
+                cameraDisplay.texture = webcamTexture;
+            }
+            // ---------------------
         }
     }
 
+    // [変更] 登録実行時 (Naming -> Recognition)
     public void OnConfirmRegistration()
     {
         if (confirmButton != null) confirmButton.interactable = false;
 
-        if (string.IsNullOrEmpty(tempObjectName) || tempSnapshot == null)
+        // --- [変更] 名前とカテゴリをここで取得 ---
+        string objectName = nameInputField.text;
+        string objectCategory = (categoryInputField != null) ? categoryInputField.text : "Default"; // カテゴリ欄がなければ"Default"
+        // ---------------------------------
+
+        // if (string.IsNullOrEmpty(tempObjectName) || tempSnapshot == null) // <-- 古いチェック
+        if (string.IsNullOrEmpty(objectName) || tempSnapshot == null) // <-- [変更] 新しいチェック
         {
             if (confirmButton != null) confirmButton.interactable = true;
             return;
@@ -267,11 +311,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         database.Add(new RegisteredObject
         {
-            Name = tempObjectName,
+            // Name = tempObjectName, // <-- 古い処理
+            Name = objectName, // <-- [変更]
             FeatureVector = featureVector,
             Keypoints = keypoints,
             Descriptors = descriptors.Clone(),
-            ImageSize = snapshotMat.Size(), // ここでサイズを取得
+            ImageSize = snapshotMat.Size(),
             RelativeEyePosition = relativeEyePos,
             RelativeMouthPosition = relativeMouthPos,
             EyeStyleId = currentEyeId,
@@ -282,7 +327,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             object_id = Guid.NewGuid().ToString(),
             user_id = currentUser.user_id,
-            Name = tempObjectName,
+            // Name = tempObjectName, // <-- 古い処理
+            Name = objectName, // <-- [変更]
             ImageData = tempSnapshot.EncodeToJPG(),
             FeatureVectorBlob = featureVectorBytes,
             KeyPointsBlob = keypointsBytes,
@@ -302,8 +348,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         try
         {
-            dbManager.SaveObjectWithFeatures(newObjectItem, new List<string>());
-            Debug.Log($"オブジェクト「{tempObjectName}」とAIデータをDBに保存しました。");
+            // --- [変更] カテゴリをリストとして渡す ---
+            List<string> categories = new List<string>();
+            if (!string.IsNullOrEmpty(objectCategory))
+            {
+                // 必要に応じてカンマ区切りなどでパースしてください
+                // 例: categories = objectCategory.Split(',').Select(s => s.Trim()).ToList();
+                categories.Add(objectCategory.Trim());
+            }
+
+            // dbManager.SaveObjectWithFeatures(newObjectItem, new List<string>()); // <-- 古い処理
+            dbManager.SaveObjectWithFeatures(newObjectItem, categories); // <-- [変更]
+            Debug.Log($"オブジェクト「{objectName}」とAIデータをDBに保存しました。"); // <-- [変更]
         }
         catch (Exception e)
         {
@@ -313,6 +369,14 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         snapshotMat.Dispose();
         currentMode = AppMode.Recognition;
         uiManager.ShowPanel(recognitionPanel);
+
+        // --- [変更] カメラを再開 ---
+        if (webcamTexture != null && !webcamTexture.isPlaying)
+        {
+            webcamTexture.Play();
+            cameraDisplay.texture = webcamTexture;
+        }
+        // ---------------------
     }
     #endregion
 
