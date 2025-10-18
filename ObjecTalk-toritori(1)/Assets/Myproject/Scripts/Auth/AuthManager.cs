@@ -91,7 +91,7 @@ public class AuthenticationManager : MonoBehaviour
 
                 if (maintainLoginState)
                 {
-                    InvokeRepeating(nameof(CheckSessionValidity), 60f, 60f);
+                    //InvokeRepeating(nameof(CheckSessionValidity), 60f, 60f);
                 }
 
                 Debug.Log("AuthenticationManager initialized successfully");
