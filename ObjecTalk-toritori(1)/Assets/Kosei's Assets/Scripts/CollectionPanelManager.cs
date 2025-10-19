@@ -1,5 +1,8 @@
 using UnityEngine;
 using UnityEngine.UI;
+using System.Collections.Generic; // Listを使うために追加
+
+
 
 public class CollectionPanelManager : MonoBehaviour
 {
@@ -10,6 +13,10 @@ public class CollectionPanelManager : MonoBehaviour
 
     [Header("削除機能")]
     public Button dismissButton;
+
+    [Header("スタイルリスト")]
+    public List<Sprite> eyeStyles; // 目スプライトのリスト
+    public List<Sprite> mouthStyles; // 口スプライトのリスト
 
     private Slot activeSlot; // 現在削除ボタンが表示されているスロット
 

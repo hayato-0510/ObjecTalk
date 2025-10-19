@@ -33,6 +33,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         Register  // Registration mode
     }
     public static StartupMode DesiredMode { get; set; } = StartupMode.Talk;
+    public static EmbeddingObjectMatcher Instance { get; private set; }
     // --- [End] ---
 
 
@@ -113,6 +114,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     // Initialize in Awake()
     void Awake()
     {
+
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+            return;
+        }
+
         dbManager = new DatabaseManager();
 
         var model = ModelLoader.Load(modelAsset);
@@ -399,70 +412,129 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     // [修正] 位置計算を削除し、一時変数を使用
     public void OnConfirmRegistration()
     {
-        Debug.LogError("<<<<< !!! OnConfirmRegistration が実行されました !!! >>>>>");
-        Debug.Log("OnConfirmRegistration が呼び出されました！");
+        Debug.Log("<<<<< OnConfirmRegistration が実行されました >>>>>");
+
+        // 各参照のnullチェックとログ出力
+        Debug.Log($"confirmButton is null?: {confirmButton == null}");
+        Debug.Log($"nameInputField is null?: {nameInputField == null}");
+        Debug.Log($"tempSnapshot is null?: {tempSnapshot == null}");
+        Debug.Log($"IntegratedAuthManager.Instance is null?: {IntegratedAuthManager.Instance == null}");
 
         if (confirmButton != null) confirmButton.interactable = false;
 
-        string objectName = nameInputField.text;
-        string objectCategory = (categoryInputField != null) ? categoryInputField.text : "Default";
-
-        Debug.Log($"入力された名前: '{objectName}', スナップショットは null?: {tempSnapshot == null}");
-
-        if (string.IsNullOrEmpty(objectName) || tempSnapshot == null)
+        string objectName = "";
+        if (nameInputField != null)
         {
-            Debug.LogWarning("名前が空かスナップショットがnullのため中断します。");
+            objectName = nameInputField.text;
+            Debug.Log($"入力された名前: '{objectName}'");
+        }
+        else
+        {
+            Debug.LogError("nameInputField が null です！");
             if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
 
-        Debug.Log("名前とスナップショットのチェックを通過。CurrentUserを取得します...");
+        string objectCategory = "";
+        if (categoryInputField != null)
+        {
+            objectCategory = categoryInputField.text;
+            Debug.Log($"入力されたカテゴリ: '{objectCategory}'");
+        }
+        else
+        {
+            Debug.LogWarning("categoryInputField が null です（デフォルトを使用）");
+            objectCategory = "Default";
+        }
+
+        if (string.IsNullOrEmpty(objectName))
+        {
+            Debug.LogWarning("名前が空のため中断します。");
+            if (confirmButton != null) confirmButton.interactable = true;
+            return;
+        }
+
+        if (tempSnapshot == null)
+        {
+            Debug.LogError("tempSnapshot が null です！");
+            if (confirmButton != null) confirmButton.interactable = true;
+            return;
+        }
+
+        Debug.Log("CurrentUserを取得します...");
+
+        if (IntegratedAuthManager.Instance == null)
+        {
+            Debug.LogError("IntegratedAuthManager.Instance が null です！");
+            if (confirmButton != null) confirmButton.interactable = true;
+            return;
+        }
+
         User currentUser = IntegratedAuthManager.Instance.CurrentUser;
         Debug.Log($"CurrentUser は null?: {currentUser == null}");
 
         if (currentUser == null)
         {
-            Debug.LogError("User not logged in. Cannot register object. Redirecting to Login.");
-            UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene"); // シーン名を要確認
+            Debug.LogError("User not logged in. Cannot register object.");
+            if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
 
-        Debug.Log("CurrentUserのチェックを通過。特徴量抽出とDB保存に進みます...");
-
-        // 不要なログを削除
-        // if(placementPanel != null) Debug.Log($"Checking PlacementPanel state BEFORE pos calc - Is Active: {placementPanel.activeInHierarchy}");
-        // if(placementEyeImage != null) Debug.Log($"Eye - activeSelf: {placementEyeImage.gameObject.activeSelf}, activeInHierarchy: {placementEyeImage.gameObject.activeInHierarchy}");
-        // if(placementMouthImage != null) Debug.Log($"Mouth - activeSelf: {placementMouthImage.gameObject.activeSelf}, activeInHierarchy: {placementMouthImage.gameObject.activeInHierarchy}");
+        Debug.Log($"CurrentUser.user_id: {currentUser.user_id}");
+        Debug.Log("特徴量抽出とDB保存に進みます...");
+        Debug.Log($"tempRelativeEyePos: ({tempRelativeEyePos.x:F2}, {tempRelativeEyePos.y:F2})");
+        Debug.Log($"tempRelativeMouthPos: ({tempRelativeMouthPos.x:F2}, {tempRelativeMouthPos.y:F2})");
+        Debug.Log($"currentEyeId: {currentEyeId}, currentMouthId: {currentMouthId}");
 
         Mat snapshotMat = null;
         try
         {
+            Debug.Log("特徴量ベクトルを取得中...");
             float[] featureVector = GetFeatureVectorFromTexture(tempSnapshot);
-            if (featureVector == null) throw new Exception("特徴量ベクトルがnullです。GetFeatureVectorFromTexture を確認してください。");
+            if (featureVector == null)
+            {
+                Debug.LogError("特徴量ベクトルが null です！");
+                throw new Exception("特徴量ベクトルがnullです。");
+            }
+            Debug.Log($"特徴量ベクトル取得成功: 長さ={featureVector.Length}");
 
+            Debug.Log("snapshotMatを作成中...");
             snapshotMat = OpenCvSharp.Unity.TextureToMat(tempSnapshot);
+            if (snapshotMat == null || snapshotMat.Empty())
+            {
+                Debug.LogError("snapshotMat の作成に失敗しました！");
+                throw new Exception("snapshotMatがnullまたは空です。");
+            }
+            Debug.Log($"snapshotMat作成成功: {snapshotMat.Width}x{snapshotMat.Height}");
+
+            Debug.Log("キーポイントとディスクリプタを検出中...");
             KeyPoint[] keypoints;
             Mat descriptors = new Mat();
             featureDetector.DetectAndCompute(snapshotMat, null, out keypoints, descriptors);
 
-            if (keypoints == null) throw new Exception("キーポイントがnullです。DetectAndCompute を確認してください。");
-            if (descriptors == null || descriptors.Empty()) throw new Exception("ディスクリプタがnullまたは空です。DetectAndCompute を確認してください。");
+            if (keypoints == null)
+            {
+                Debug.LogError("キーポイントが null です！");
+                throw new Exception("キーポイントがnullです。");
+            }
+            Debug.Log($"キーポイント検出成功: {keypoints.Length}個");
 
+            if (descriptors == null || descriptors.Empty())
+            {
+                Debug.LogError("ディスクリプタが null または空です！");
+                throw new Exception("ディスクリプタがnullまたは空です。");
+            }
+            Debug.Log($"ディスクリプタ作成成功: {descriptors.Rows}x{descriptors.Cols}");
+
+            Debug.Log("バイト配列に変換中...");
             byte[] featureVectorBytes = new byte[featureVector.Length * sizeof(float)];
             Buffer.BlockCopy(featureVector, 0, featureVectorBytes, 0, featureVectorBytes.Length);
             byte[] keypointsBytes = SerializeKeyPoints(keypoints);
             byte[] descriptorsBytes = SerializeMat(descriptors);
+            Debug.Log($"変換成功: featureVectorBytes={featureVectorBytes.Length}, keypointsBytes={keypointsBytes.Length}, descriptorsBytes={descriptorsBytes.Length}");
 
-            // --- ▼▼▼ 位置計算ロジックを削除 ▼▼▼ ---
-            /*
-            Vector2 relativeEyePos = new Vector2(-1, -1);
-            // ... (if文の中の計算) ...
-            Vector2 relativeMouthPos = new Vector2(-1, -1);
-            // ... (if文の中の計算) ...
-            */
-            // --- ▲▲▲ 削除ここまで ▲▲▲ ---
-
-            // database リストへの追加 (一時変数を使う)
+            // database リストへの追加
+            Debug.Log("database リストに追加中...");
             database.Add(new RegisteredObject
             {
                 Name = objectName,
@@ -470,13 +542,15 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 Keypoints = keypoints,
                 Descriptors = descriptors.Clone(),
                 ImageSize = snapshotMat.Size(),
-                RelativeEyePosition = tempRelativeEyePos, // ★変更★
-                RelativeMouthPosition = tempRelativeMouthPos, // ★変更★
+                RelativeEyePosition = tempRelativeEyePos,
+                RelativeMouthPosition = tempRelativeMouthPos,
                 EyeStyleId = currentEyeId,
                 MouthStyleId = currentMouthId
             });
+            Debug.Log("database リストへの追加成功");
 
-            // DB保存用のデータ作成 (一時変数を使う)
+            // DB保存用のデータ作成
+            Debug.Log("ObjectItem を作成中...");
             var newObjectItem = new ObjectItem
             {
                 object_id = Guid.NewGuid().ToString(),
@@ -486,15 +560,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 FeatureVectorBlob = featureVectorBytes,
                 KeyPointsBlob = keypointsBytes,
                 DescriptorsBlob = descriptorsBytes,
-                EyePositionX = tempRelativeEyePos.x, // ★変更★
-                EyePositionY = tempRelativeEyePos.y, // ★変更★
-                MouthPositionX = tempRelativeMouthPos.x, // ★変更★
-                MouthPositionY = tempRelativeMouthPos.y, // ★変更★
+                EyePositionX = tempRelativeEyePos.x,
+                EyePositionY = tempRelativeEyePos.y,
+                MouthPositionX = tempRelativeMouthPos.x,
+                MouthPositionY = tempRelativeMouthPos.y,
                 ImageWidth = snapshotMat.Size().Width,
                 ImageHeight = snapshotMat.Size().Height,
                 EyeStyleId = currentEyeId,
                 MouthStyleId = currentMouthId
             };
+            Debug.Log($"ObjectItem作成成功: object_id={newObjectItem.object_id}");
 
             List<string> categories = new List<string>();
             if (!string.IsNullOrEmpty(objectCategory))
@@ -502,14 +577,22 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 categories.Add(objectCategory.Trim());
             }
 
-            dbManager.SaveObjectWithFeatures(newObjectItem, categories);
+            Debug.Log("データベースに保存中...");
+            if (dbManager == null)
+            {
+                Debug.LogError("dbManager が null です！");
+                throw new Exception("dbManager がnullです。");
+            }
 
-            Debug.Log($"オブジェクト「{objectName}」とAIデータをDBに保存しました。");
+            dbManager.SaveObjectWithFeatures(newObjectItem, categories);
+            Debug.Log($"オブジェクト「{objectName}」をDBに保存しました。");
 
         }
         catch (Exception e)
         {
-            Debug.LogError($"データベースへの保存または特徴量抽出中にエラーが発生しました: {e.ToString()}");
+            Debug.LogError($"エラーが発生しました: {e.GetType().Name}");
+            Debug.LogError($"エラーメッセージ: {e.Message}");
+            Debug.LogError($"スタックトレース: {e.StackTrace}");
             if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
@@ -518,11 +601,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             snapshotMat?.Dispose();
         }
 
-        // --- [パネル遷移処理] ---
+        // パネル遷移処理
+        Debug.Log("パネル遷移を実行中...");
         if (namingPanel != null) namingPanel.SetActive(false);
         if (talkSelectionPanel != null) talkSelectionPanel.SetActive(true);
         if (objectMatcherRootPanel != null) objectMatcherRootPanel.SetActive(false);
-        // --- [End] ---
+        Debug.Log("登録処理が完了しました！");
     }
     #endregion
 
