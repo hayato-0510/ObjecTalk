@@ -63,28 +63,58 @@ public class IntegratedAuthManager : MonoBehaviour
         HideLoading();
     }
 
+    // IntegratedAuthManager.cs
+
     public void RefreshCollectionDisplay()
     {
-        // (このメソッドに変更はありません)
-        if (CollectionPanelManager.Instance != null)
-        {
-            CollectionPanelManager.Instance.ResetActiveSlotState();
-        }
-        if (CurrentUser == null)
-        {
-            Debug.LogWarning("ログイン中のユーザーがいないため、図鑑を更新できません。");
-            return;
-        }
+        // --- ▼▼▼ この if ブロックを削除 ▼▼▼ ---
+        /*
         if (collectionSlotGrid == null)
         {
             Debug.Log("SlotGridへの参照が失われていたため、再検索します。");
-            collectionSlotGrid = FindFirstObjectByType<SlotGrid>();
+            collectionSlotGrid = FindFirstObjectByType<SlotGrid>(FindObjectsInactive.Include);
+
+            if (collectionSlotGrid == null)
+            {
+                 Debug.LogError("再検索しても SlotGrid が見つかりませんでした！...");
+                 return;
+            }
+            else
+            {
+                 Debug.Log("SlotGrid を再検索で見つけました！");
+            }
         }
-        var userObjects = databaseManager.GetAllUserObjectsWithDetails(CurrentUser.user_id);
-        if (collectionSlotGrid != null)
+        */
+        // --- ▲▲▲ 削除ここまで ▲▲▲ ---
+
+        // ★★★ SlotGrid が null かどうかをここでチェック ★★★
+        if (collectionSlotGrid == null)
         {
-            collectionSlotGrid.InitializeCollection(userObjects);
-            Debug.Log("図鑑の表示を最新の情報に更新しました。");
+            Debug.LogError("collectionSlotGrid が null です！参照が設定されていません。");
+            return; // SlotGrid がなければ更新できない
+        }
+
+        // --- ▼▼▼ 以降の処理は変更なし ▼▼▼ ---
+        if (CollectionPanelManager.Instance != null) { /* ... */ }
+        if (CurrentUser == null) { /* ... */ return; }
+
+        var userObjects = databaseManager.GetAllUserObjectsWithDetails(CurrentUser.user_id);
+        Debug.Log($"SlotGrid.InitializeCollection を呼び出します。アイテム数: {userObjects?.Count ?? 0}");
+        collectionSlotGrid.InitializeCollection(userObjects);
+        Debug.Log("図鑑の表示を最新の情報に更新しました。");
+    }
+
+    // ★ FindAndAssignSlotGrid メソッドは残しておく ★
+    public void FindAndAssignSlotGrid()
+    {
+        collectionSlotGrid = FindFirstObjectByType<SlotGrid>(FindObjectsInactive.Include);
+        if (collectionSlotGrid == null)
+        {
+            Debug.LogError("ホームシーンで SlotGrid が見つかりませんでした！");
+        }
+        else
+        {
+            Debug.Log("SlotGrid への参照を再取得/確認しました。");
         }
     }
 

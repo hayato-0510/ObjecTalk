@@ -26,6 +26,7 @@ public class CollectionPanelManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
+            DontDestroyOnLoad(gameObject); // Å© Ç±ÇÍÇí«â¡ÅI
         }
         else
         {
