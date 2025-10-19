@@ -17,7 +17,7 @@ public class TalkSelectionManager : MonoBehaviour
         talkAgainButton.onClick.AddListener(OnTalkAgain);
     }
 
-    private void OnRegisterNew()
+    public void OnRegisterNew()
     {
         // 1. 起動モードを「登録」に設定
         EmbeddingObjectMatcher.DesiredMode = EmbeddingObjectMatcher.StartupMode.Register;
@@ -26,7 +26,7 @@ public class TalkSelectionManager : MonoBehaviour
         LoadObjectMatcherScene();
     }
 
-    private void OnTalkAgain()
+    public void OnTalkAgain()
     {
         // 1. 起動モードを「会話」に設定
         EmbeddingObjectMatcher.DesiredMode = EmbeddingObjectMatcher.StartupMode.Talk;
