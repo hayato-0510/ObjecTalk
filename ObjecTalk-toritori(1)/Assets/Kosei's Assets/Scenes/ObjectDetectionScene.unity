@@ -6103,6 +6103,7 @@ MonoBehaviour:
   mouthToggle: {fileID: 424475802}
   similarityThreshold: 0.8
   compareInterval: 0.5
+  recognitionLossDelay: 1
 --- !u!1 &1361103705
 GameObject:
   m_ObjectHideFlags: 0
@@ -6939,6 +6940,7 @@ MonoBehaviour:
   mouthToggle: {fileID: 424475802}
   similarityThreshold: 0.8
   compareInterval: 0.5
+  recognitionLossDelay: 1
 --- !u!4 &1596530252
 Transform:
   m_ObjectHideFlags: 0

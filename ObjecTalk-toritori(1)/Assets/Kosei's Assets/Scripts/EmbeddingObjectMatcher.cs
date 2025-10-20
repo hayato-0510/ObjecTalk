@@ -26,6 +26,26 @@ public class RegisteredObject
 
 public class EmbeddingObjectMatcher : MonoBehaviour
 {
+    // ★★★ 追加: 物体認識フラグ ★★★
+    /// <summary>
+    /// 物体が現在認識されているかどうかを示すフラグ
+    /// 1 = 認識中, 0 = 認識なし
+    /// </summary>
+    public int IsObjectRecognized { get; private set; } = 0;
+
+    /// <summary>
+    /// 最後に認識された物体の名前
+    /// </summary>
+    public string LastRecognizedObjectName { get; private set; } = "";
+
+    /// <summary>
+    /// 認識状態が変化したときに発火するイベント
+    /// (bool isRecognized, string objectName)
+    /// </summary>
+    public event Action<bool, string> OnRecognitionStateChanged;
+    // ★★★ 追加終了 ★★★
+
+
     // --- [Startup Mode Static Variable] ---
     public enum StartupMode
     {
@@ -93,6 +113,14 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     [Range(0.5f, 1.0f)] public float similarityThreshold = 0.85f;
     [Range(0.1f, 2.0f)] public float compareInterval = 0.2f;
 
+    // ★★★ 追加: 認識喪失までの猶予時間 ★★★
+    [Header("Recognition Loss Settings")]
+    [Tooltip("物体が見えなくなってから認識フラグを0にするまでの猶予時間(秒)")]
+    [Range(0.1f, 5.0f)] public float recognitionLossDelay = 1.0f;
+    private float lastRecognitionTime = 0f;
+    // ★★★ 追加終了 ★★★
+
+
     // --- Private Variables ---
     private List<RegisteredObject> database = new List<RegisteredObject>();
     private Texture2D tempSnapshot;
@@ -128,9 +156,6 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         else
         {
             Debug.LogError("AdvancedSceneLoader (sceneLoader) is not assigned in the Inspector!");
-            // フォールバックとして直接ロード (ただしカメラ停止は保証される)
-            // string[] parts = sceneAndPanelTarget.Split('/');
-            // if(parts.Length == 2) SceneManager.LoadScene(parts[0]);
         }
     }
     // --- ▲▲▲ ---
@@ -167,8 +192,6 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             Debug.LogError("No webcam devices found!");
         }
-
-        // LoadRegisteredObjectsFromDatabase(); // Moved to OnEnable
 
         // --- Register Listeners ---
         if (registerStartButton != null) registerStartButton.onClick.AddListener(OnRegisterStart);
@@ -252,6 +275,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             webcamTexture.Stop();
         }
+
+        // ★★★ 追加: カメラ停止時に認識フラグをリセット ★★★
+        UpdateRecognitionState(false, "");
+        // ★★★ 追加終了 ★★★
     }
 
 
@@ -263,9 +290,21 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             if (Time.time - lastCompareTime > compareInterval)
             {
-                // Debug.Log("Update: Calling FindObject..."); // Can be noisy
                 lastCompareTime = Time.time;
-                FindObject();
+
+                // ★★★ 変更: FindObjectの呼び出しと事後処理 ★★★
+                bool recognized = FindObject();
+
+                // 認識されていない場合、猶予時間をチェック
+                if (!recognized)
+                {
+                    // 既に認識中(1)であり、かつ最後の認識から猶予時間を超えた場合
+                    if (IsObjectRecognized == 1 && Time.time - lastRecognitionTime > recognitionLossDelay)
+                    {
+                        UpdateRecognitionState(false, "");
+                    }
+                }
+                // ★★★ 変更終了 ★★★
             }
         }
     }
@@ -291,6 +330,39 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         }
         Debug.Log("EmbeddingObjectMatcher OnDestroy completed.");
     }
+
+    // ★★★ 追加: 認識状態を更新するメソッド ★★★
+    /// <summary>
+    /// 物体認識状態を更新し、変化があればイベントを発火します
+    /// </summary>
+    /// <param name="isRecognized">認識されたかどうか</param>
+    /// <param name="objectName">認識された物体の名前 (認識OFF時は "" を期待)</param>
+    private void UpdateRecognitionState(bool isRecognized, string objectName)
+    {
+        int newState = isRecognized ? 1 : 0;
+        string newName = isRecognized ? objectName : "";
+
+        // 状態が変化した場合のみ処理 (0->1, 1->0, or 1->"A" -> 1->"B")
+        if (IsObjectRecognized != newState || LastRecognizedObjectName != newName)
+        {
+            IsObjectRecognized = newState;
+            LastRecognizedObjectName = newName;
+
+            // イベントを発火
+            OnRecognitionStateChanged?.Invoke(isRecognized, newName);
+
+            // ログ出力
+            if (isRecognized)
+            {
+                Debug.Log($"★ 物体認識: ON (1) - 物体名: {objectName}");
+            }
+            else
+            {
+                Debug.Log($"★ 物体認識: OFF (0)");
+            }
+        }
+    }
+    // ★★★ 追加終了 ★★★
 
     #region Mode Switching
     private void SwitchToNamingMode()
@@ -403,8 +475,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             }
             Vector2 localEyePoint = snapshotDisplay_Placement.rectTransform.InverseTransformPoint(placementEyeImage.position);
             tempRelativeEyePos = new Vector2(
-               Mathf.Clamp01((localEyePoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
-               Mathf.Clamp01((localEyePoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
+                Mathf.Clamp01((localEyePoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
+                Mathf.Clamp01((localEyePoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
             Debug.Log($"Calculated tempRelativeEyePos: ({tempRelativeEyePos.x:F2}, {tempRelativeEyePos.y:F2})");
         }
         else
@@ -423,8 +495,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             }
             Vector2 localMouthPoint = snapshotDisplay_Placement.rectTransform.InverseTransformPoint(placementMouthImage.position);
             tempRelativeMouthPos = new Vector2(
-               Mathf.Clamp01((localMouthPoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
-               Mathf.Clamp01((localMouthPoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
+                Mathf.Clamp01((localMouthPoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
+                Mathf.Clamp01((localMouthPoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
             Debug.Log($"Calculated tempRelativeMouthPos: ({tempRelativeMouthPos.x:F2}, {tempRelativeMouthPos.y:F2})");
         }
         else
@@ -816,8 +888,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 {
                     var matches = matcher.KnnMatch(potentialMatch.Descriptors, liveDescriptors, 2);
                     var goodMatches = matches.Where(m => m != null && m.Length >= 2 && m[0].Distance < 0.75 * m[1].Distance)
-                                             .Select(m => m[0])
-                                             .ToList();
+                                            .Select(m => m[0])
+                                            .ToList();
 
                     if (goodMatches.Count > 20)
                     {
@@ -839,6 +911,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                                 UpdateFacialFeatures(potentialMatch, homography);
                                 if (resultText != null) resultText.text = $"発見: {potentialMatch.Name}!";
                                 Debug.Log($"FindObject finished. Found: True - {potentialMatch.Name}");
+
+                                // ★★★ 追加: 認識成功時にフラグを更新 ★★★
+                                lastRecognitionTime = Time.time;
+                                UpdateRecognitionState(true, potentialMatch.Name);
+                                // ★★★ 追加終了 ★★★
+
                                 return true; // Success
                             }
                         } // end if (validMatches.Count > 20)
