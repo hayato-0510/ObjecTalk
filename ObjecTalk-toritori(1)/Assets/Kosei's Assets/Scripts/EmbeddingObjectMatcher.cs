@@ -26,6 +26,26 @@ public class RegisteredObject
 
 public class EmbeddingObjectMatcher : MonoBehaviour
 {
+    // ★★★ 追加: 物体認識フラグ ★★★
+    /// <summary>
+    /// 物体が現在認識されているかどうかを示すフラグ
+    /// 1 = 認識中, 0 = 認識なし
+    /// </summary>
+    public int IsObjectRecognized { get; private set; } = 0;
+
+    /// <summary>
+    /// 最後に認識された物体の名前
+    /// </summary>
+    public string LastRecognizedObjectName { get; private set; } = "";
+
+    /// <summary>
+    /// 認識状態が変化したときに発火するイベント
+    /// (bool isRecognized, string objectName)
+    /// </summary>
+    public event Action<bool, string> OnRecognitionStateChanged;
+    // ★★★ 追加終了 ★★★
+
+
     // --- [Startup Mode Static Variable] ---
     public enum StartupMode
     {
@@ -33,9 +53,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         Register  // Registration mode
     }
     public static StartupMode DesiredMode { get; set; } = StartupMode.Talk;
-    public static EmbeddingObjectMatcher Instance { get; private set; }
+    public static EmbeddingObjectMatcher Instance { get; private set; } // Singleton Instance
+    public AdvancedSceneLoader sceneLoader;
     // --- [End] ---
-
 
     private enum AppMode { Recognition, Naming, Placement }
     private AppMode currentMode = AppMode.Recognition;
@@ -93,38 +113,68 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     [Range(0.5f, 1.0f)] public float similarityThreshold = 0.85f;
     [Range(0.1f, 2.0f)] public float compareInterval = 0.2f;
 
+    // ★★★ 追加: 認識喪失までの猶予時間 ★★★
+    [Header("Recognition Loss Settings")]
+    [Tooltip("物体が見えなくなってから認識フラグを0にするまでの猶予時間(秒)")]
+    [Range(0.1f, 5.0f)] public float recognitionLossDelay = 1.0f;
+    private float lastRecognitionTime = 0f;
+    // ★★★ 追加終了 ★★★
+
+
+    // --- Private Variables ---
     private List<RegisteredObject> database = new List<RegisteredObject>();
     private Texture2D tempSnapshot;
     private int currentEyeId = -1;
     private int currentMouthId = -1;
-
-    // --- ▼▼▼ 変数宣言を追加 ▼▼▼ ---
-    private Vector2 tempRelativeEyePos = new Vector2(-1, -1); // 計算結果を一時保存
-    private Vector2 tempRelativeMouthPos = new Vector2(-1, -1); // 計算結果を一時保存
-    // --- ▲▲▲ ---
-
-
+    private Vector2 tempRelativeEyePos = new Vector2(-1, -1);
+    private Vector2 tempRelativeMouthPos = new Vector2(-1, -1);
     private IWorker worker;
     private AKAZE featureDetector;
     private BFMatcher matcher;
-
     private WebCamTexture webcamTexture;
     private float lastCompareTime = 0f;
+
+    public void ReturnToHomeAndStopCamera(string sceneAndPanelTarget)
+    {
+        Debug.Log($"Returning to {sceneAndPanelTarget} and stopping camera...");
+
+        // 1. カメラを確実に停止させる (OnDisableを呼ぶ)
+        if (objectMatcherRootPanel != null)
+        {
+            objectMatcherRootPanel.SetActive(false);
+        }
+        else
+        {
+            Debug.LogError("objectMatcherRootPanel is not set!");
+        }
+
+        // 2. シーンローダーを呼び出す
+        if (sceneLoader != null)
+        {
+            sceneLoader.LoadSceneAndSetPanel(sceneAndPanelTarget);
+        }
+        else
+        {
+            Debug.LogError("AdvancedSceneLoader (sceneLoader) is not assigned in the Inspector!");
+        }
+    }
+    // --- ▲▲▲ ---
 
     // Initialize in Awake()
     void Awake()
     {
-
+        // --- Singleton Setup ---
         if (Instance == null)
         {
             Instance = this;
-            DontDestroyOnLoad(gameObject);
+            DontDestroyOnLoad(gameObject); // Keep across scene loads
         }
         else
         {
-            Destroy(gameObject);
+            Destroy(gameObject); // Destroy duplicates
             return;
         }
+        // --- End Singleton ---
 
         dbManager = new DatabaseManager();
 
@@ -138,43 +188,38 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             webcamTexture = new WebCamTexture(WebCamTexture.devices[0].name, 1280, 720, 30);
             // Don't set texture here; set in OnEnable
         }
-
-        LoadRegisteredObjectsFromDatabase();
-
-        // --- ▼▼▼ リスナーをコードで統一 ▼▼▼ ---
-        if (registerStartButton != null)
+        else
         {
-            registerStartButton.onClick.AddListener(OnRegisterStart);
+            Debug.LogError("No webcam devices found!");
         }
-        else { Debug.LogError("Register Start Button is not assigned!"); }
 
-        if (nextButton != null)
-        {
-            nextButton.onClick.AddListener(OnPlacementConfirmed);
-        }
-        else { Debug.LogError("Next Button is not assigned!"); }
+        // --- Register Listeners ---
+        if (registerStartButton != null) registerStartButton.onClick.AddListener(OnRegisterStart);
+        else Debug.LogError("Register Start Button is not assigned!");
 
-        if (confirmButton != null)
-        {
-            confirmButton.onClick.AddListener(OnConfirmRegistration);
-        }
-        else { Debug.LogError("Confirm Button is not assigned!"); }
+        if (nextButton != null) nextButton.onClick.AddListener(OnPlacementConfirmed);
+        else Debug.LogError("Next Button is not assigned!");
 
-        if (backButton != null)
-        {
-            backButton.onClick.AddListener(OnBackButtonClicked);
-        }
-        else { Debug.LogError("Back Button is not assigned!"); }
+        if (confirmButton != null) confirmButton.onClick.AddListener(OnConfirmRegistration);
+        else Debug.LogError("Confirm Button is not assigned!");
 
-        // トグル
+        if (backButton != null) backButton.onClick.AddListener(OnBackButtonClicked);
+        else Debug.LogError("Back Button is not assigned!");
+
+        // Toggles
         if (eyeToggle != null) eyeToggle.onValueChanged.AddListener(OnCategoryChanged);
         if (mouthToggle != null) mouthToggle.onValueChanged.AddListener(OnCategoryChanged);
-        // --- ▲▲▲ ---
+        // --- End Listeners ---
     }
 
-    // Start camera and set UI when the panel becomes active
+    // Start camera, load data, and set UI when the panel becomes active
     void OnEnable()
     {
+        // --- Load latest data from DB ---
+        Debug.Log("OnEnable: Loading database...");
+        LoadRegisteredObjectsFromDatabase();
+        // --- End Load ---
+
         // 1. Assign WebCamTexture to both RawImages and reset color
         if (registerCameraDisplay != null)
         {
@@ -190,10 +235,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // 2. Start the camera if it's not already playing
         if (webcamTexture != null && !webcamTexture.isPlaying)
         {
+            Debug.Log("OnEnable: Starting Webcam...");
             webcamTexture.Play();
         }
 
-        // 3. Hide registration flow panels
+        // 3. Hide registration flow panels initially
         if (placementPanel != null) placementPanel.SetActive(false);
         if (namingPanel != null) namingPanel.SetActive(false);
 
@@ -201,6 +247,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         if (DesiredMode == StartupMode.Talk)
         {
             // Conversation Mode
+            Debug.Log("OnEnable: Setting up Talk Mode UI.");
             if (talkCameraPanel != null) talkCameraPanel.SetActive(true);
             if (registerCameraPanel != null) registerCameraPanel.SetActive(false);
 
@@ -212,6 +259,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         else // DesiredMode == StartupMode.Register
         {
             // Registration Mode
+            Debug.Log("OnEnable: Setting up Register Mode UI.");
             if (talkCameraPanel != null) talkCameraPanel.SetActive(false);
             if (registerCameraPanel != null) registerCameraPanel.SetActive(true);
 
@@ -222,10 +270,15 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     // Stop camera when the panel becomes inactive
     void OnDisable()
     {
+        Debug.Log("OnDisable: Stopping Webcam...");
         if (webcamTexture != null && webcamTexture.isPlaying)
         {
             webcamTexture.Stop();
         }
+
+        // ★★★ 追加: カメラ停止時に認識フラグをリセット ★★★
+        UpdateRecognitionState(false, "");
+        // ★★★ 追加終了 ★★★
     }
 
 
@@ -233,93 +286,170 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         // Only run FindObject() in Talk mode
         if (currentMode == AppMode.Recognition && DesiredMode == StartupMode.Talk &&
-            webcamTexture != null && webcamTexture.didUpdateThisFrame && database.Count > 0)
+            webcamTexture != null && webcamTexture.didUpdateThisFrame && database != null && database.Count > 0)
         {
             if (Time.time - lastCompareTime > compareInterval)
             {
                 lastCompareTime = Time.time;
-                FindObject();
+
+                // ★★★ 変更: FindObjectの呼び出しと事後処理 ★★★
+                bool recognized = FindObject();
+
+                // 認識されていない場合、猶予時間をチェック
+                if (!recognized)
+                {
+                    // 既に認識中(1)であり、かつ最後の認識から猶予時間を超えた場合
+                    if (IsObjectRecognized == 1 && Time.time - lastRecognitionTime > recognitionLossDelay)
+                    {
+                        UpdateRecognitionState(false, "");
+                    }
+                }
+                // ★★★ 変更終了 ★★★
             }
         }
     }
 
     void OnDestroy()
     {
+        // Remove listeners to prevent memory leaks
         if (registerStartButton != null) registerStartButton.onClick.RemoveListener(OnRegisterStart);
         if (nextButton != null) nextButton.onClick.RemoveListener(OnPlacementConfirmed);
-        if (confirmButton != null) confirmButton.onClick.RemoveListener(OnConfirmRegistration); // リスナー削除追加
+        if (confirmButton != null) confirmButton.onClick.RemoveListener(OnConfirmRegistration);
         if (backButton != null) backButton.onClick.RemoveListener(OnBackButtonClicked);
         if (eyeToggle != null) eyeToggle.onValueChanged.RemoveListener(OnCategoryChanged);
         if (mouthToggle != null) mouthToggle.onValueChanged.RemoveListener(OnCategoryChanged);
 
+        // Dispose resources
         worker?.Dispose();
         matcher?.Dispose();
         featureDetector?.Dispose();
-        if (webcamTexture != null) webcamTexture.Stop(); // Ensure stopped on destroy
+        if (webcamTexture != null)
+        {
+            if (webcamTexture.isPlaying) webcamTexture.Stop();
+            // Destroy(webcamTexture); // Optional: Destroy the texture object itself
+        }
+        Debug.Log("EmbeddingObjectMatcher OnDestroy completed.");
     }
+
+    // ★★★ 追加: 認識状態を更新するメソッド ★★★
+    /// <summary>
+    /// 物体認識状態を更新し、変化があればイベントを発火します
+    /// </summary>
+    /// <param name="isRecognized">認識されたかどうか</param>
+    /// <param name="objectName">認識された物体の名前 (認識OFF時は "" を期待)</param>
+    private void UpdateRecognitionState(bool isRecognized, string objectName)
+    {
+        int newState = isRecognized ? 1 : 0;
+        string newName = isRecognized ? objectName : "";
+
+        // 状態が変化した場合のみ処理 (0->1, 1->0, or 1->"A" -> 1->"B")
+        if (IsObjectRecognized != newState || LastRecognizedObjectName != newName)
+        {
+            IsObjectRecognized = newState;
+            LastRecognizedObjectName = newName;
+
+            // イベントを発火
+            OnRecognitionStateChanged?.Invoke(isRecognized, newName);
+
+            // ログ出力
+            if (isRecognized)
+            {
+                Debug.Log($"★ 物体認識: ON (1) - 物体名: {objectName}");
+            }
+            else
+            {
+                Debug.Log($"★ 物体認識: OFF (0)");
+            }
+        }
+    }
+    // ★★★ 追加終了 ★★★
 
     #region Mode Switching
     private void SwitchToNamingMode()
     {
         currentMode = AppMode.Naming;
         if (tempSnapshot == null) { Debug.LogError("Snapshot is missing!"); return; }
-        // [修正] UnityEngine.Rect を明示
+        // Explicitly use UnityEngine.Rect
         var sprite = Sprite.Create(tempSnapshot, new UnityEngine.Rect(0, 0, tempSnapshot.width, tempSnapshot.height), new Vector2(0.5f, 0.5f));
-        snapshotDisplay_Naming.sprite = sprite;
+        if (snapshotDisplay_Naming != null) snapshotDisplay_Naming.sprite = sprite;
+        else Debug.LogError("SnapshotDisplay_Naming is not assigned!");
 
         if (namingPanel != null) namingPanel.SetActive(true);
         if (placementPanel != null) placementPanel.SetActive(false);
 
-        nameInputField.text = "";
+        if (nameInputField != null) nameInputField.text = "";
         if (categoryInputField != null) categoryInputField.text = "";
+        Debug.Log("Switched to Naming Mode.");
     }
+
     private void SwitchToPlacementMode(Texture2D snapshot)
     {
         currentMode = AppMode.Placement;
-        // [修正] UnityEngine.Rect を明示
-        snapshotDisplay_Placement.sprite = Sprite.Create(snapshot, new UnityEngine.Rect(0, 0, snapshot.width, snapshot.height), new Vector2(0.5f, 0.5f));
+        // Explicitly use UnityEngine.Rect
+        if (snapshotDisplay_Placement != null) snapshotDisplay_Placement.sprite = Sprite.Create(snapshot, new UnityEngine.Rect(0, 0, snapshot.width, snapshot.height), new Vector2(0.5f, 0.5f));
+        else Debug.LogError("SnapshotDisplay_Placement is not assigned!");
 
-        mouthToggle.isOn = false;
-        eyeToggle.isOn = true; // デフォルトで目を表示
-        PopulateStyleScrollView(true); // 目のスタイルを表示
+        if (mouthToggle != null) mouthToggle.isOn = false;
+        if (eyeToggle != null) eyeToggle.isOn = true; // Default to eye styles
+        PopulateStyleScrollView(true); // Populate eye styles
 
-        // パーツの初期状態を非表示にする
-        placementEyeImage.gameObject.SetActive(false);
-        placementMouthImage.gameObject.SetActive(false);
-        // IDもリセット
+        // Ensure parts are initially hidden
+        if (placementEyeImage != null) placementEyeImage.gameObject.SetActive(false);
+        if (placementMouthImage != null) placementMouthImage.gameObject.SetActive(false);
+        // Reset IDs
         currentEyeId = -1;
         currentMouthId = -1;
+        Debug.Log("Switched to Placement Mode.");
     }
     #endregion
 
     #region Button Handlers & UI Logic
     public void SelectEyeStyle(int id)
     {
-        if (id < 0 || id >= eyeStyles.Count) return;
+        if (eyeStyles == null || id < 0 || id >= eyeStyles.Count) return;
         currentEyeId = id;
-        placementEyeImage.GetComponent<Image>().sprite = eyeStyles[id];
-        placementEyeImage.gameObject.SetActive(true);
+        if (placementEyeImage != null)
+        {
+            Image img = placementEyeImage.GetComponent<Image>();
+            if (img != null) img.sprite = eyeStyles[id];
+            placementEyeImage.gameObject.SetActive(true);
+            Debug.Log($"Selected Eye Style ID: {id}");
+        }
     }
 
     public void SelectMouthStyle(int id)
     {
-        if (id < 0 || id >= mouthStyles.Count) return;
+        if (mouthStyles == null || id < 0 || id >= mouthStyles.Count) return;
         currentMouthId = id;
-        placementMouthImage.GetComponent<Image>().sprite = mouthStyles[id];
-        placementMouthImage.gameObject.SetActive(true);
+        if (placementMouthImage != null)
+        {
+            Image img = placementMouthImage.GetComponent<Image>();
+            if (img != null) img.sprite = mouthStyles[id];
+            placementMouthImage.gameObject.SetActive(true);
+            Debug.Log($"Selected Mouth Style ID: {id}");
+        }
     }
 
     public void OnRegisterStart()
     {
-        if (confirmButton != null) { confirmButton.interactable = true; } // NamingPanelのボタン
+        if (confirmButton != null) { confirmButton.interactable = true; }
         if (webcamTexture == null || !webcamTexture.isPlaying)
         {
             Debug.LogError("Webcam not available or not playing!");
             return;
         }
-        tempSnapshot = new Texture2D(webcamTexture.width, webcamTexture.height, TextureFormat.RGB24, false);
-        tempSnapshot.SetPixels(webcamTexture.GetPixels());
-        tempSnapshot.Apply();
+        try
+        {
+            tempSnapshot = new Texture2D(webcamTexture.width, webcamTexture.height, TextureFormat.RGB24, false);
+            tempSnapshot.SetPixels(webcamTexture.GetPixels());
+            tempSnapshot.Apply();
+            Debug.Log("Snapshot taken.");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error taking snapshot: {e.Message}");
+            return;
+        }
 
         // Don't stop camera here; let OnDisable handle it
 
@@ -329,25 +459,24 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         SwitchToPlacementMode(tempSnapshot);
     }
 
-    // [修正] 位置計算を追加
     public void OnPlacementConfirmed()
     {
-        Debug.LogError("<<<<< OnPlacementConfirmed が実行されました >>>>>");
+        Debug.LogError("<<<<< OnPlacementConfirmed が実行されました >>>>>"); // Keep your debug log
         Debug.Log("OnPlacementConfirmed called. Calculating positions...");
 
-        // --- ▼▼▼ ここで位置計算を実行 ▼▼▼ ---
-        tempRelativeEyePos = new Vector2(-1, -1); // 計算前にリセット
+        tempRelativeEyePos = new Vector2(-1, -1);
         if (placementEyeImage != null && placementEyeImage.gameObject.activeInHierarchy)
         {
             if (snapshotDisplay_Placement == null || snapshotDisplay_Placement.rectTransform == null)
             {
                 Debug.LogError("snapshotDisplay_Placement reference is missing!");
+                SwitchToNamingMode(); // Still proceed, but position will be invalid
                 return;
             }
             Vector2 localEyePoint = snapshotDisplay_Placement.rectTransform.InverseTransformPoint(placementEyeImage.position);
             tempRelativeEyePos = new Vector2(
-               Mathf.Clamp01((localEyePoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
-               Mathf.Clamp01((localEyePoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
+                Mathf.Clamp01((localEyePoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
+                Mathf.Clamp01((localEyePoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
             Debug.Log($"Calculated tempRelativeEyePos: ({tempRelativeEyePos.x:F2}, {tempRelativeEyePos.y:F2})");
         }
         else
@@ -355,27 +484,26 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.LogWarning("Eye image was not active or found when calculating position.");
         }
 
-        tempRelativeMouthPos = new Vector2(-1, -1); // 計算前にリセット
+        tempRelativeMouthPos = new Vector2(-1, -1);
         if (placementMouthImage != null && placementMouthImage.gameObject.activeInHierarchy)
         {
             if (snapshotDisplay_Placement == null || snapshotDisplay_Placement.rectTransform == null)
             {
                 Debug.LogError("snapshotDisplay_Placement reference is missing!");
+                SwitchToNamingMode(); // Still proceed, but position will be invalid
                 return;
             }
             Vector2 localMouthPoint = snapshotDisplay_Placement.rectTransform.InverseTransformPoint(placementMouthImage.position);
             tempRelativeMouthPos = new Vector2(
-               Mathf.Clamp01((localMouthPoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
-               Mathf.Clamp01((localMouthPoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
+                Mathf.Clamp01((localMouthPoint.x - snapshotDisplay_Placement.rectTransform.rect.xMin) / snapshotDisplay_Placement.rectTransform.rect.width),
+                Mathf.Clamp01((localMouthPoint.y - snapshotDisplay_Placement.rectTransform.rect.yMin) / snapshotDisplay_Placement.rectTransform.rect.height));
             Debug.Log($"Calculated tempRelativeMouthPos: ({tempRelativeMouthPos.x:F2}, {tempRelativeMouthPos.y:F2})");
         }
         else
         {
             Debug.LogWarning("Mouth image was not active or found when calculating position.");
         }
-        // --- ▲▲▲ 計算ここまで ▲▲▲ ---
 
-        // パーツ配置完了後、名前入力画面へ
         SwitchToNamingMode();
     }
 
@@ -384,173 +512,153 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         if (currentMode == AppMode.Recognition)
         {
-            // Camera Panel -> Mode Selection Panel
-            if (talkSelectionPanel != null) talkSelectionPanel.SetActive(true);
-            if (objectMatcherRootPanel != null) objectMatcherRootPanel.SetActive(false);
+            // [修正前のロジック]
+            // 「認識」画面（RegisterCameraPanel または TalkCameraPanel）から「モード選択」画面に戻る
+
+            Debug.Log("Back button pressed on Recognition panel. Returning to selection panel.");
+
+            // 1. モード選択パネルを表示する
+            if (talkSelectionPanel != null)
+            {
+                talkSelectionPanel.SetActive(true);
+            }
+            else
+            {
+                Debug.LogError("talkSelectionPanel が設定されていません！");
+            }
+
+            // 2. このカメラパネル（の親）を非表示にする (これにより OnDisable が呼ばれカメラが停止する)
+            if (objectMatcherRootPanel != null)
+            {
+                Debug.Log("Deactivating objectMatcherRootPanel...");
+                objectMatcherRootPanel.SetActive(false);
+            }
+            else
+            {
+                Debug.LogError("objectMatcherRootPanel が設定されていません！");
+            }
+
+            // ★★★ シーンをロードする処理はここには無い ★★★
         }
         else if (currentMode == AppMode.Naming)
         {
             // Naming -> Placement
+            Debug.Log("Back button pressed on Naming panel. Returning to placement.");
             currentMode = AppMode.Placement;
             if (namingPanel != null) namingPanel.SetActive(false);
             if (placementPanel != null) placementPanel.SetActive(true);
-            // Re-populate styles in case user goes back and forth
-            if (eyeToggle.isOn) PopulateStyleScrollView(true); else PopulateStyleScrollView(false);
+            // Re-populate styles
+            if (eyeToggle != null && mouthToggle != null) // Add null checks
+            {
+                if (eyeToggle.isOn) PopulateStyleScrollView(true); else PopulateStyleScrollView(false);
+            }
 
         }
         else if (currentMode == AppMode.Placement)
         {
             // Placement -> RegisterCameraPanel
+            Debug.Log("Back button pressed on Placement panel. Returning to register camera.");
             currentMode = AppMode.Recognition;
             if (placementPanel != null) placementPanel.SetActive(false);
+
             if (registerCameraPanel != null) registerCameraPanel.SetActive(true);
             if (talkCameraPanel != null) talkCameraPanel.SetActive(false);
+
             DesiredMode = StartupMode.Register;
+            // OnEnable will handle camera Play if needed
         }
     }
 
-    // [修正] 位置計算を削除し、一時変数を使用
     public void OnConfirmRegistration()
     {
-        Debug.Log("<<<<< OnConfirmRegistration が実行されました >>>>>");
-
-        // 各参照のnullチェックとログ出力
-        Debug.Log($"confirmButton is null?: {confirmButton == null}");
-        Debug.Log($"nameInputField is null?: {nameInputField == null}");
-        Debug.Log($"tempSnapshot is null?: {tempSnapshot == null}");
-        Debug.Log($"IntegratedAuthManager.Instance is null?: {IntegratedAuthManager.Instance == null}");
+        Debug.LogError("<<<<< !!! OnConfirmRegistration が実行されました !!! >>>>>"); // Keep your debug log
+        Debug.Log("OnConfirmRegistration called.");
 
         if (confirmButton != null) confirmButton.interactable = false;
 
-        string objectName = "";
-        if (nameInputField != null)
-        {
-            objectName = nameInputField.text;
-            Debug.Log($"入力された名前: '{objectName}'");
-        }
-        else
-        {
-            Debug.LogError("nameInputField が null です！");
-            if (confirmButton != null) confirmButton.interactable = true;
-            return;
-        }
+        string objectName = nameInputField?.text ?? ""; // Null check
+        string objectCategory = categoryInputField?.text ?? "Default"; // Null check
 
-        string objectCategory = "";
-        if (categoryInputField != null)
-        {
-            objectCategory = categoryInputField.text;
-            Debug.Log($"入力されたカテゴリ: '{objectCategory}'");
-        }
-        else
-        {
-            Debug.LogWarning("categoryInputField が null です（デフォルトを使用）");
-            objectCategory = "Default";
-        }
+        Debug.Log($"Name entered: '{objectName}', Snapshot null?: {tempSnapshot == null}");
 
         if (string.IsNullOrEmpty(objectName))
         {
-            Debug.LogWarning("名前が空のため中断します。");
+            Debug.LogWarning("Name is empty, aborting registration.");
             if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
-
         if (tempSnapshot == null)
         {
-            Debug.LogError("tempSnapshot が null です！");
+            Debug.LogError("tempSnapshot is null! Cannot register.");
             if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
 
-        Debug.Log("CurrentUserを取得します...");
-
-        if (IntegratedAuthManager.Instance == null)
-        {
-            Debug.LogError("IntegratedAuthManager.Instance が null です！");
-            if (confirmButton != null) confirmButton.interactable = true;
-            return;
-        }
-
-        User currentUser = IntegratedAuthManager.Instance.CurrentUser;
-        Debug.Log($"CurrentUser は null?: {currentUser == null}");
+        Debug.Log("Checking CurrentUser...");
+        User currentUser = IntegratedAuthManager.Instance?.CurrentUser; // Null check on Instance
+        Debug.Log($"CurrentUser null?: {currentUser == null}");
 
         if (currentUser == null)
         {
-            Debug.LogError("User not logged in. Cannot register object.");
-            if (confirmButton != null) confirmButton.interactable = true;
+            Debug.LogError("User not logged in. Cannot register object. Redirecting to Login.");
+            UnityEngine.SceneManagement.SceneManager.LoadScene("LoginScene"); // Ensure scene name is correct
             return;
         }
 
-        Debug.Log($"CurrentUser.user_id: {currentUser.user_id}");
-        Debug.Log("特徴量抽出とDB保存に進みます...");
-        Debug.Log($"tempRelativeEyePos: ({tempRelativeEyePos.x:F2}, {tempRelativeEyePos.y:F2})");
-        Debug.Log($"tempRelativeMouthPos: ({tempRelativeMouthPos.x:F2}, {tempRelativeMouthPos.y:F2})");
-        Debug.Log($"currentEyeId: {currentEyeId}, currentMouthId: {currentMouthId}");
+        Debug.Log($"CurrentUser ID: {currentUser.user_id}");
+        Debug.Log("Proceeding with feature extraction and DB save...");
+        Debug.Log($"Using tempRelativeEyePos: ({tempRelativeEyePos.x:F2}, {tempRelativeEyePos.y:F2})");
+        Debug.Log($"Using tempRelativeMouthPos: ({tempRelativeMouthPos.x:F2}, {tempRelativeMouthPos.y:F2})");
+        Debug.Log($"Using currentEyeId: {currentEyeId}, currentMouthId: {currentMouthId}");
 
         Mat snapshotMat = null;
+        Mat descriptors = null; // Declare here for Dispose in finally
         try
         {
-            Debug.Log("特徴量ベクトルを取得中...");
+            Debug.Log("Getting feature vector...");
             float[] featureVector = GetFeatureVectorFromTexture(tempSnapshot);
-            if (featureVector == null)
-            {
-                Debug.LogError("特徴量ベクトルが null です！");
-                throw new Exception("特徴量ベクトルがnullです。");
-            }
-            Debug.Log($"特徴量ベクトル取得成功: 長さ={featureVector.Length}");
+            if (featureVector == null) throw new Exception("Feature vector is null.");
+            Debug.Log($"Got feature vector, length: {featureVector.Length}");
 
-            Debug.Log("snapshotMatを作成中...");
+            Debug.Log("Creating snapshot Mat...");
             snapshotMat = OpenCvSharp.Unity.TextureToMat(tempSnapshot);
-            if (snapshotMat == null || snapshotMat.Empty())
-            {
-                Debug.LogError("snapshotMat の作成に失敗しました！");
-                throw new Exception("snapshotMatがnullまたは空です。");
-            }
-            Debug.Log($"snapshotMat作成成功: {snapshotMat.Width}x{snapshotMat.Height}");
+            if (snapshotMat == null || snapshotMat.Empty()) throw new Exception("snapshotMat is null or empty.");
+            Debug.Log($"Created snapshot Mat: {snapshotMat.Width}x{snapshotMat.Height}");
 
-            Debug.Log("キーポイントとディスクリプタを検出中...");
+            Debug.Log("Detecting keypoints and descriptors...");
             KeyPoint[] keypoints;
-            Mat descriptors = new Mat();
+            descriptors = new Mat(); // Initialize here
             featureDetector.DetectAndCompute(snapshotMat, null, out keypoints, descriptors);
 
-            if (keypoints == null)
-            {
-                Debug.LogError("キーポイントが null です！");
-                throw new Exception("キーポイントがnullです。");
-            }
-            Debug.Log($"キーポイント検出成功: {keypoints.Length}個");
+            if (keypoints == null) throw new Exception("Keypoints are null.");
+            Debug.Log($"Detected keypoints: {keypoints.Length}");
+            if (descriptors == null || descriptors.Empty()) throw new Exception("Descriptors are null or empty.");
+            Debug.Log($"Created descriptors: {descriptors.Rows}x{descriptors.Cols}");
 
-            if (descriptors == null || descriptors.Empty())
-            {
-                Debug.LogError("ディスクリプタが null または空です！");
-                throw new Exception("ディスクリプタがnullまたは空です。");
-            }
-            Debug.Log($"ディスクリプタ作成成功: {descriptors.Rows}x{descriptors.Cols}");
-
-            Debug.Log("バイト配列に変換中...");
+            Debug.Log("Converting features to byte arrays...");
             byte[] featureVectorBytes = new byte[featureVector.Length * sizeof(float)];
             Buffer.BlockCopy(featureVector, 0, featureVectorBytes, 0, featureVectorBytes.Length);
             byte[] keypointsBytes = SerializeKeyPoints(keypoints);
             byte[] descriptorsBytes = SerializeMat(descriptors);
-            Debug.Log($"変換成功: featureVectorBytes={featureVectorBytes.Length}, keypointsBytes={keypointsBytes.Length}, descriptorsBytes={descriptorsBytes.Length}");
+            if (keypointsBytes == null || descriptorsBytes == null) throw new Exception("Serialization failed.");
+            Debug.Log($"Converted: FV={featureVectorBytes.Length}, KP={keypointsBytes.Length}, Desc={descriptorsBytes.Length}");
 
-            // database リストへの追加
-            Debug.Log("database リストに追加中...");
+            Debug.Log("Adding to memory database...");
             database.Add(new RegisteredObject
             {
                 Name = objectName,
                 FeatureVector = featureVector,
                 Keypoints = keypoints,
-                Descriptors = descriptors.Clone(),
+                Descriptors = descriptors.Clone(), // Clone descriptors for the in-memory list
                 ImageSize = snapshotMat.Size(),
                 RelativeEyePosition = tempRelativeEyePos,
                 RelativeMouthPosition = tempRelativeMouthPos,
                 EyeStyleId = currentEyeId,
                 MouthStyleId = currentMouthId
             });
-            Debug.Log("database リストへの追加成功");
+            Debug.Log("Added to memory database.");
 
-            // DB保存用のデータ作成
-            Debug.Log("ObjectItem を作成中...");
+            Debug.Log("Creating ObjectItem for DB...");
             var newObjectItem = new ObjectItem
             {
                 object_id = Guid.NewGuid().ToString(),
@@ -569,7 +677,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 EyeStyleId = currentEyeId,
                 MouthStyleId = currentMouthId
             };
-            Debug.Log($"ObjectItem作成成功: object_id={newObjectItem.object_id}");
+            Debug.Log($"Created ObjectItem, ID: {newObjectItem.object_id}");
 
             List<string> categories = new List<string>();
             if (!string.IsNullOrEmpty(objectCategory))
@@ -577,36 +685,32 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 categories.Add(objectCategory.Trim());
             }
 
-            Debug.Log("データベースに保存中...");
-            if (dbManager == null)
-            {
-                Debug.LogError("dbManager が null です！");
-                throw new Exception("dbManager がnullです。");
-            }
+            Debug.Log("Saving to database...");
+            if (dbManager == null) throw new Exception("dbManager is null.");
 
             dbManager.SaveObjectWithFeatures(newObjectItem, categories);
-            Debug.Log($"オブジェクト「{objectName}」をDBに保存しました。");
+            Debug.Log($"Object '{objectName}' saved to DB successfully.");
 
         }
         catch (Exception e)
         {
-            Debug.LogError($"エラーが発生しました: {e.GetType().Name}");
-            Debug.LogError($"エラーメッセージ: {e.Message}");
-            Debug.LogError($"スタックトレース: {e.StackTrace}");
-            if (confirmButton != null) confirmButton.interactable = true;
-            return;
+            Debug.LogError($"Error during registration process: {e.ToString()}"); // Log full exception
+            if (confirmButton != null) confirmButton.interactable = true; // Re-enable button on error
+            return; // Stop execution on error
         }
         finally
         {
+            // Ensure OpenCV Mats are disposed even if errors occur
             snapshotMat?.Dispose();
+            descriptors?.Dispose(); // Dispose descriptors here
         }
 
-        // パネル遷移処理
-        Debug.Log("パネル遷移を実行中...");
+        // --- Panel Transition ---
+        Debug.Log("Registration successful. Returning to selection panel.");
         if (namingPanel != null) namingPanel.SetActive(false);
         if (talkSelectionPanel != null) talkSelectionPanel.SetActive(true);
-        if (objectMatcherRootPanel != null) objectMatcherRootPanel.SetActive(false);
-        Debug.Log("登録処理が完了しました！");
+        if (objectMatcherRootPanel != null) objectMatcherRootPanel.SetActive(false); // Triggers OnDisable
+        // --- End ---
     }
     #endregion
 
@@ -614,7 +718,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     void OnCategoryChanged(bool isOn)
     {
         if (!isOn) return;
-        if (eyeToggle.isOn)
+        if (eyeToggle != null && eyeToggle.isOn) // Add null check
         {
             PopulateStyleScrollView(true);
         }
@@ -628,10 +732,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         if (styleButtonParent == null || styleButtonPrefab == null)
         {
-            Debug.LogError("Style ScrollView references not set!");
+            Debug.LogError("Style ScrollView references (Parent or Prefab) not set!");
             return;
         }
-        // Clear existing buttons
         foreach (Transform child in styleButtonParent)
         {
             Destroy(child.gameObject);
@@ -646,13 +749,19 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         for (int i = 0; i < stylesToShow.Count; i++)
         {
+            if (stylesToShow[i] == null) continue; // Skip if sprite is missing
+
             GameObject buttonGO = Instantiate(styleButtonPrefab, styleButtonParent);
             Image buttonImage = buttonGO.GetComponent<Image>();
             Button buttonComp = buttonGO.GetComponent<Button>();
+
             if (buttonImage != null) buttonImage.sprite = stylesToShow[i];
+            else Debug.LogWarning($"Prefab '{styleButtonPrefab.name}' is missing Image component.");
+
             if (buttonComp != null)
             {
-                int styleId = i; // Local copy for the closure
+                int styleId = i;
+                buttonComp.onClick.RemoveAllListeners(); // Clear previous listeners if any
                 if (isEyes)
                 {
                     buttonComp.onClick.AddListener(() => SelectEyeStyle(styleId));
@@ -662,25 +771,26 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                     buttonComp.onClick.AddListener(() => SelectMouthStyle(styleId));
                 }
             }
+            else Debug.LogWarning($"Prefab '{styleButtonPrefab.name}' is missing Button component.");
         }
-        if (styleScrollViewRect != null) styleScrollViewRect.horizontalNormalizedPosition = 0; // Reset scroll position
+        if (styleScrollViewRect != null) styleScrollViewRect.horizontalNormalizedPosition = 0;
     }
     #endregion
 
     #region Recognition Logic
     private void LoadRegisteredObjectsFromDatabase()
     {
-        if (dbManager == null) { Debug.LogError("DatabaseManager is null!"); return; } // Null check
-        User currentUser = IntegratedAuthManager.Instance?.CurrentUser; // Null check on Instance
+        if (dbManager == null) { Debug.LogError("DatabaseManager is null! Cannot load objects."); return; }
+        User currentUser = IntegratedAuthManager.Instance?.CurrentUser;
         if (currentUser == null)
         {
             Debug.LogWarning("User not logged in, cannot load detection data from DB.");
-            database.Clear(); // Clear list if not logged in
+            database.Clear();
             return;
         }
 
         List<ObjectItem> userObjects = dbManager.GetAllUserObjectsWithDetails(currentUser.user_id);
-        database.Clear(); // Clear before loading
+        database.Clear();
 
         if (userObjects == null)
         {
@@ -688,57 +798,61 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             return;
         }
 
-
+        Debug.Log($"Attempting to load {userObjects.Count} objects from DB...");
         foreach (var item in userObjects)
         {
-            if (item == null || item.FeatureVectorBlob == null || item.FeatureVectorBlob.Length == 0) continue; // More null checks
+            if (item == null || item.FeatureVectorBlob == null || item.FeatureVectorBlob.Length == 0 || item.KeyPointsBlob == null || item.DescriptorsBlob == null)
+            {
+                Debug.LogWarning($"Skipping incomplete object data (ID: {item?.object_id ?? "N/A"}, Name: {item?.Name ?? "N/A"}).");
+                continue;
+            }
 
-            try // Add try-catch for robustness during deserialization
+            Mat itemDescriptors = null; // Declare here for Dispose in catch/finally
+            try
             {
                 float[] featureVector = new float[item.FeatureVectorBlob.Length / sizeof(float)];
                 Buffer.BlockCopy(item.FeatureVectorBlob, 0, featureVector, 0, item.FeatureVectorBlob.Length);
 
                 KeyPoint[] keypoints = DeserializeKeyPoints(item.KeyPointsBlob);
-                Mat descriptors = DeserializeMat(item.DescriptorsBlob);
+                itemDescriptors = DeserializeMat(item.DescriptorsBlob); // Assign here
 
-                // Check if deserialization succeeded
-                if (keypoints == null || descriptors == null)
+                if (keypoints == null || keypoints.Length == 0 || itemDescriptors == null || itemDescriptors.Empty())
                 {
                     Debug.LogWarning($"Failed to deserialize features for object: {item.Name}. Skipping.");
-                    continue;
+                    continue; // Skip if deserialization failed
                 }
-
 
                 Vector2 eyePos = new Vector2(item.EyePositionX, item.EyePositionY);
                 Vector2 mouthPos = new Vector2(item.MouthPositionX, item.MouthPositionY);
-
                 OpenCvSharp.Size imageSize = new OpenCvSharp.Size(item.ImageWidth, item.ImageHeight);
-
 
                 database.Add(new RegisteredObject
                 {
                     Name = item.Name,
                     FeatureVector = featureVector,
                     Keypoints = keypoints,
-                    Descriptors = descriptors,
+                    Descriptors = itemDescriptors, // Add the Mat directly
                     RelativeEyePosition = eyePos,
                     RelativeMouthPosition = mouthPos,
                     ImageSize = imageSize,
                     EyeStyleId = item.EyeStyleId,
                     MouthStyleId = item.MouthStyleId
                 });
+                // IMPORTANT: Do NOT dispose itemDescriptors here, it's stored in the database list
             }
             catch (Exception e)
             {
-                Debug.LogError($"Error loading object '{item.Name}' from DB: {e.Message}");
+                Debug.LogError($"Error loading object '{item.Name}' from DB: {e.ToString()}");
+                itemDescriptors?.Dispose(); // Dispose if an error occurred during processing
             }
         }
-        Debug.Log($"Loaded {database.Count} object data from database for detection.");
+        Debug.Log($"Successfully loaded {database.Count} objects into memory database.");
     }
 
+    // [修正済み] インデックスチェックを追加
     private bool FindObject()
     {
-        if (webcamTexture == null || !webcamTexture.isPlaying || database == null || database.Count == 0) return false;
+        if (webcamTexture == null || !webcamTexture.isPlaying || database == null || database.Count == 0 || featureDetector == null || matcher == null) return false;
 
         float[] currentVector = GetFeatureVectorFromTexture(webcamTexture);
         if (currentVector == null) return false;
@@ -747,7 +861,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         RegisteredObject potentialMatch = null;
         foreach (var obj in database)
         {
-            if (obj?.FeatureVector == null) continue; // Null check
+            if (obj?.FeatureVector == null) continue;
             float similarity = CalculateCosineSimilarity(currentVector, obj.FeatureVector);
             if (similarity > bestSimilarity)
             {
@@ -768,42 +882,67 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 liveDescriptors = new Mat();
                 featureDetector.DetectAndCompute(liveFrameMat, null, out liveKeypoints, liveDescriptors);
 
-                if (liveKeypoints != null && liveKeypoints.Length > 20 && potentialMatch.Descriptors != null && !potentialMatch.Descriptors.Empty())
+                if (liveKeypoints != null && liveKeypoints.Length > 20 &&
+                    potentialMatch.Keypoints != null && // Check registered keypoints
+                    potentialMatch.Descriptors != null && !potentialMatch.Descriptors.Empty())
                 {
                     var matches = matcher.KnnMatch(potentialMatch.Descriptors, liveDescriptors, 2);
-                    var goodMatches = matches.Where(m => m != null && m.Length >= 2 && m[0].Distance < 0.75 * m[1].Distance).Select(m => m[0]).ToList();
+                    var goodMatches = matches.Where(m => m != null && m.Length >= 2 && m[0].Distance < 0.75 * m[1].Distance)
+                                            .Select(m => m[0])
+                                            .ToList();
+
                     if (goodMatches.Count > 20)
                     {
-                        var srcPts = goodMatches.Select(m => potentialMatch.Keypoints[m.QueryIdx].Pt).ToArray();
-                        var dstPts = goodMatches.Select(m => liveKeypoints[m.TrainIdx].Pt).ToArray();
-                        homography = Cv2.FindHomography(InputArray.Create(srcPts), InputArray.Create(dstPts), HomographyMethods.Ransac, 5.0);
-                        if (homography != null && !homography.Empty())
+                        // Index out of bounds check
+                        var validMatches = goodMatches.Where(m =>
+                            m.QueryIdx >= 0 && m.QueryIdx < potentialMatch.Keypoints.Length &&
+                            m.TrainIdx >= 0 && m.TrainIdx < liveKeypoints.Length
+                        ).ToList();
+
+                        if (validMatches.Count > 20)
                         {
-                            UpdateFacialFeatures(potentialMatch, homography);
-                            if (resultText != null) resultText.text = $"発見: {potentialMatch.Name}!";
-                            return true; // Return early on success
-                        }
-                    }
-                }
+                            var srcPts = validMatches.Select(m => potentialMatch.Keypoints[m.QueryIdx].Pt).ToArray();
+                            var dstPts = validMatches.Select(m => liveKeypoints[m.TrainIdx].Pt).ToArray();
+
+                            homography = Cv2.FindHomography(InputArray.Create(srcPts), InputArray.Create(dstPts), HomographyMethods.Ransac, 5.0);
+
+                            if (homography != null && !homography.Empty())
+                            {
+                                UpdateFacialFeatures(potentialMatch, homography);
+                                if (resultText != null) resultText.text = $"発見: {potentialMatch.Name}!";
+                                Debug.Log($"FindObject finished. Found: True - {potentialMatch.Name}");
+
+                                // ★★★ 追加: 認識成功時にフラグを更新 ★★★
+                                lastRecognitionTime = Time.time;
+                                UpdateRecognitionState(true, potentialMatch.Name);
+                                // ★★★ 追加終了 ★★★
+
+                                return true; // Success
+                            }
+                        } // end if (validMatches.Count > 20)
+                    } // end if (goodMatches.Count > 20)
+                } // end if (liveKeypoints != null ...)
             }
             catch (Exception e)
             {
-                Debug.LogError($"Error during FindObject feature matching: {e.Message}");
+                Debug.LogError($"Error during FindObject feature matching: {e.ToString()}");
             }
-            finally // Ensure Mats are disposed
+            finally
             {
                 homography?.Dispose();
                 liveFrameMat?.Dispose();
                 liveDescriptors?.Dispose();
             }
-        }
+        } // end if (bestSimilarity > similarityThreshold ...)
 
-        // Reset UI if no match found or match not good enough
+        // Reset UI if no match
         if (resultText != null) resultText.text = "捜索中...";
         if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
         if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
+        // Debug.Log("FindObject finished. Found: False");
         return false;
     }
+
 
     private float[] GetFeatureVectorFromTexture(Texture inputTexture)
     {
@@ -816,8 +955,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             tensor = new Tensor(tempRT, 3);
             worker.Execute(tensor);
-            // Use PeekOutput to avoid disposing tensor managed by Barracuda
-            Tensor outputTensor = worker.PeekOutput();
+            Tensor outputTensor = worker.PeekOutput(); // Use PeekOutput
             featureVector = outputTensor.AsFloats();
         }
         catch (Exception e)
@@ -828,41 +966,45 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         finally
         {
             RenderTexture.ReleaseTemporary(tempRT);
-            tensor?.Dispose(); // Dispose the input tensor we created
+            tensor?.Dispose();
         }
         return featureVector;
     }
 
     private void UpdateFacialFeatures(RegisteredObject obj, Mat homography)
     {
-        if (obj.EyeStyleId != -1 && recognitionEyeImage != null && obj.EyeStyleId >= 0 && obj.EyeStyleId < eyeStyles.Count) // Index check
+        // Add null checks for safety
+        bool eyeSet = false;
+        if (obj.EyeStyleId != -1 && recognitionEyeImage != null && eyeStyles != null && obj.EyeStyleId >= 0 && obj.EyeStyleId < eyeStyles.Count)
         {
             recognitionEyeImage.sprite = eyeStyles[obj.EyeStyleId];
             UpdatePartPosition(obj, homography, obj.RelativeEyePosition, recognitionEyeImage.rectTransform);
             recognitionEyeImage.gameObject.SetActive(true);
+            eyeSet = true;
         }
-        else if (recognitionEyeImage != null)
+        if (!eyeSet && recognitionEyeImage != null)
         {
             recognitionEyeImage.gameObject.SetActive(false);
         }
-        if (obj.MouthStyleId != -1 && recognitionMouthImage != null && obj.MouthStyleId >= 0 && obj.MouthStyleId < mouthStyles.Count) // Index check
+
+        bool mouthSet = false;
+        if (obj.MouthStyleId != -1 && recognitionMouthImage != null && mouthStyles != null && obj.MouthStyleId >= 0 && obj.MouthStyleId < mouthStyles.Count)
         {
             recognitionMouthImage.sprite = mouthStyles[obj.MouthStyleId];
             UpdatePartPosition(obj, homography, obj.RelativeMouthPosition, recognitionMouthImage.rectTransform);
             recognitionMouthImage.gameObject.SetActive(true);
+            mouthSet = true;
         }
-        else if (recognitionMouthImage != null)
+        if (!mouthSet && recognitionMouthImage != null)
         {
             recognitionMouthImage.gameObject.SetActive(false);
         }
     }
 
+
     private void UpdatePartPosition(RegisteredObject obj, Mat homography, Vector2 relativePos, RectTransform partTransform)
     {
-        if (talkCameraDisplay == null || webcamTexture == null || homography == null || homography.Empty() || obj == null || obj.ImageSize.Width <= 0 || obj.ImageSize.Height <= 0 || partTransform == null)
-        {
-            return; // More robust guard clauses
-        }
+        if (talkCameraDisplay == null || webcamTexture == null || homography == null || homography.Empty() || obj == null || obj.ImageSize.Width <= 0 || obj.ImageSize.Height <= 0 || partTransform == null) return;
 
         try
         {
@@ -881,7 +1023,6 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Vector2 bottomEdge = Vector2.Lerp(dstCorners[3], dstCorners[2], relativePos.x);
             Vector2 projectedPos = Vector2.Lerp(topEdge, bottomEdge, 1 - relativePos.y);
 
-            // Convert projectedPos (pixel coords on texture) to local position within RawImage rect
             RectTransform cameraRect = talkCameraDisplay.rectTransform;
             if (cameraRect == null) return;
 
@@ -895,14 +1036,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 (normalizedPos.y - cameraRect.pivot.y) * cameraRect.rect.height
             );
 
-            // Debug log removed for brevity, uncomment if needed
-            // Debug.Log($"{partTransform.name} - Calculated LocalPos: ({localPos.x:F0}, {localPos.y:F0})");
-
             partTransform.anchoredPosition = localPos;
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error during UpdatePartPosition calculation: {e.ToString()}"); // Use ToString for stack trace
+            Debug.LogError($"Error during UpdatePartPosition calculation: {e.ToString()}");
         }
     }
 
@@ -913,7 +1051,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         float dotProduct = 0.0f;
         float magnitudeA = 0.0f;
         float magnitudeB = 0.0f;
-        int len = vecA.Length; // Cache length
+        int len = vecA.Length;
         for (int i = 0; i < len; i++)
         {
             dotProduct += vecA[i] * vecB[i];
@@ -921,16 +1059,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             magnitudeB += vecB[i] * vecB[i];
         }
 
-        // Avoid division by zero if magnitude is zero
         if (magnitudeA == 0 || magnitudeB == 0) return 0;
 
         magnitudeA = Mathf.Sqrt(magnitudeA);
         magnitudeB = Mathf.Sqrt(magnitudeB);
 
-        // Check for NaN which can happen with invalid sqrt results, though unlikely here
         if (float.IsNaN(magnitudeA) || float.IsNaN(magnitudeB)) return 0;
 
-        return dotProduct / (magnitudeA * magnitudeB);
+        // Add a small epsilon to denominator to prevent potential division by extremely small numbers near zero
+        float denominator = (magnitudeA * magnitudeB);
+        if (denominator < float.Epsilon) return 0;
+
+        return dotProduct / denominator;
     }
     #endregion
 
@@ -944,7 +1084,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             writer.Write(keyPoints.Length);
             foreach (var kp in keyPoints)
             {
-                // Add null checks for safety? Unlikely needed for KeyPoint itself
+                if (kp == null) continue; // Safety check
                 writer.Write(kp.Pt.X); writer.Write(kp.Pt.Y);
                 writer.Write(kp.Size); writer.Write(kp.Angle);
                 writer.Write(kp.Response); writer.Write(kp.Octave);
@@ -955,22 +1095,19 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     private KeyPoint[] DeserializeKeyPoints(byte[] bytes)
     {
-        if (bytes == null || bytes.Length == 0) return new KeyPoint[0]; // Return empty array, not null
+        if (bytes == null || bytes.Length == 0) return new KeyPoint[0];
         try
         {
             using (var ms = new MemoryStream(bytes))
             using (var reader = new BinaryReader(ms))
             {
-                // Check if there's enough data for the length
                 if (ms.Length - ms.Position < sizeof(int)) return new KeyPoint[0];
-
                 var len = reader.ReadInt32();
-                if (len < 0 || len > bytes.Length) return new KeyPoint[0]; // Basic sanity check
+                if (len < 0 || len > 100000) return new KeyPoint[0]; // More reasonable max check
                 if (len == 0) return new KeyPoint[0];
-
-                // Check if there's enough data for all keypoints
-                // Size of one KeyPoint data (approx): 6 * float + 1 * int = 6*4 + 4 = 28 bytes
-                if (ms.Length - ms.Position < len * 28) return new KeyPoint[0]; // Rough estimate
+                // More accurate size check
+                long expectedBytes = (long)len * (sizeof(float) * 5 + sizeof(int)); // 5 floats (X, Y, Size, Angle, Response) + 1 int (Octave)
+                if (ms.Length - ms.Position < expectedBytes) return new KeyPoint[0];
 
                 var keyPoints = new KeyPoint[len];
                 for (int i = 0; i < len; i++)
@@ -978,15 +1115,15 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                     var x = reader.ReadSingle(); var y = reader.ReadSingle();
                     var size = reader.ReadSingle(); var angle = reader.ReadSingle();
                     var response = reader.ReadSingle(); var octave = reader.ReadInt32();
-                    keyPoints[i] = new KeyPoint(new Point2f(x, y), size, angle, response, octave);
+                    keyPoints[i] = new KeyPoint(x, y, size, angle, response, octave, -1); // Use constructor specifying all params
                 }
                 return keyPoints;
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error deserializing KeyPoints: {e.Message}");
-            return new KeyPoint[0]; // Return empty on error
+            Debug.LogError($"Error deserializing KeyPoints: {e.ToString()}"); // Log stack trace
+            return new KeyPoint[0];
         }
     }
 
@@ -996,7 +1133,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         try
         {
             var size = mat.Total() * mat.ElemSize();
-            if (size <= 0 || size > int.MaxValue) return null; // Check for invalid size
+            if (size <= 0 || size > int.MaxValue) return null;
             var data = new byte[size];
             Marshal.Copy(mat.Data, data, 0, (int)size);
 
@@ -1013,7 +1150,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error serializing Mat: {e.Message}");
+            Debug.LogError($"Error serializing Mat: {e.ToString()}"); // Log stack trace
             return null;
         }
     }
@@ -1021,46 +1158,42 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private Mat DeserializeMat(byte[] bytes)
     {
         if (bytes == null || bytes.Length == 0) return null;
+        Mat mat = null; // Declare outside try for potential Dispose in catch
         try
         {
             using (var ms = new MemoryStream(bytes))
             using (var reader = new BinaryReader(ms))
             {
-                // Check if there's enough data for header
                 if (ms.Length - ms.Position < sizeof(int) * 4) return null;
-
                 var rows = reader.ReadInt32();
                 var cols = reader.ReadInt32();
                 var typeValue = reader.ReadInt32();
                 var len = reader.ReadInt32();
 
-                // Basic sanity checks
-                if (rows < 0 || cols < 0 || len < 0 || len > bytes.Length) return null;
-                if (ms.Length - ms.Position < len) return null; // Check if enough data for payload
+                if (rows < 0 || cols < 0 || len < 0 || len > bytes.Length || ms.Length - ms.Position < len) return null;
 
                 MatType type;
-                try { type = (MatType)typeValue; } catch { return null; } // Ensure type is valid
-
+                try { type = (MatType)typeValue; } catch { return null; }
 
                 var data = reader.ReadBytes(len);
-                var mat = new Mat(rows, cols, type);
+                mat = new Mat(rows, cols, type); // Assign to outer variable
 
-                // Check if mat dimensions match data length
                 long expectedSize = mat.Total() * mat.ElemSize();
                 if (expectedSize != len)
                 {
+                    Debug.LogError($"Mat deserialization size mismatch. Expected {expectedSize}, got {len}. Rows={rows}, Cols={cols}, Type={type}");
                     mat.Dispose(); // Dispose incorrectly sized Mat
                     return null;
                 }
 
-
                 if (data.Length > 0) Marshal.Copy(data, 0, mat.Data, data.Length);
-                return mat;
+                return mat; // Return the created Mat
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error deserializing Mat: {e.Message}");
+            Debug.LogError($"Error deserializing Mat: {e.ToString()}"); // Log stack trace
+            mat?.Dispose(); // Dispose if created before error
             return null;
         }
     }

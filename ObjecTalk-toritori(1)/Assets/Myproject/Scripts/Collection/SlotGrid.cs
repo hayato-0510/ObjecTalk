@@ -10,7 +10,7 @@ public class SlotGrid : MonoBehaviour
 
     private void Awake()
     {
-        panelManager = GetComponentInParent<CollectionPanelManager>();
+        panelManager = CollectionPanelManager.Instance; // ← シングルトンを直接参照する
 
         // ★追加: Managerが見つかったかログで確認
         if (panelManager == null)
@@ -28,6 +28,7 @@ public class SlotGrid : MonoBehaviour
     /// </summary>
     public void InitializeCollection(List<ObjectItem> userObjects)
     {
+        Debug.Log($"InitializeCollection called with {userObjects?.Count ?? 0} items."); // ← 追加
         // 1. 既に表示されている古いスロットがあれば、一度すべて削除する
         foreach (Transform child in transform)
         {
