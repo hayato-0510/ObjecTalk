@@ -40,11 +40,9 @@ public class ObjectItem
     [Column("feature_vector_blob")]
     public byte[] FeatureVectorBlob { get; set; }
 
-    // ★追加: KeyPointデータを保存する
     [Column("keypoints_blob")]
     public byte[] KeyPointsBlob { get; set; }
 
-    // ★追加: Descriptorデータを保存する
     [Column("descriptors_blob")]
     public byte[] DescriptorsBlob { get; set; }
 
@@ -65,6 +63,8 @@ public class ObjectItem
     public int EyeStyleId { get; set; }
     [Column("mouth_style_id")]
     public int MouthStyleId { get; set; }
+    [Column("personality_prompt")]
+    public string PersonalityPrompt { get; set; }
 
     //[Column("image_url")]
     //public string ImageURL { get; set; }
