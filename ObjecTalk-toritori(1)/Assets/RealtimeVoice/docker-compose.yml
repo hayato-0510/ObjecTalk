@@ -1,0 +1,15 @@
+services:
+  realtime-voice-chat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: realtime-voice-chat
+    ports:
+      - "3001:3001"  # バックエンドサーバー (WebSocket + REST API)
+    environment:
+      - NODE_ENV=development
+    env_file:
+      - .env
+    command: npm run dev
+    stdin_open: true
+    tty: true

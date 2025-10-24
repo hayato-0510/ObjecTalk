@@ -26,24 +26,24 @@ public class RegisteredObject
 
 public class EmbeddingObjectMatcher : MonoBehaviour
 {
-    // ššš ’Ç‰Á: •¨‘Ì”F¯ƒtƒ‰ƒO ššš
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½: ï¿½ï¿½ï¿½Ì”Fï¿½ï¿½ï¿½tï¿½ï¿½ï¿½O ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     /// <summary>
-    /// •¨‘Ì‚ªŒ»İ”F¯‚³‚ê‚Ä‚¢‚é‚©‚Ç‚¤‚©‚ğ¦‚·ƒtƒ‰ƒO
-    /// 1 = ”F¯’†, 0 = ”F¯‚È‚µ
+    /// ï¿½ï¿½ï¿½Ì‚ï¿½ï¿½ï¿½ï¿½İ”Fï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½é‚©ï¿½Ç‚ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½tï¿½ï¿½ï¿½O
+    /// 1 = ï¿½Fï¿½ï¿½ï¿½ï¿½, 0 = ï¿½Fï¿½ï¿½ï¿½È‚ï¿½
     /// </summary>
     public int IsObjectRecognized { get; private set; } = 0;
 
     /// <summary>
-    /// ÅŒã‚É”F¯‚³‚ê‚½•¨‘Ì‚Ì–¼‘O
+    /// ï¿½ÅŒï¿½É”Fï¿½ï¿½ï¿½ï¿½ï¿½ê‚½ï¿½ï¿½ï¿½Ì‚Ì–ï¿½ï¿½O
     /// </summary>
     public string LastRecognizedObjectName { get; private set; } = "";
 
     /// <summary>
-    /// ”F¯ó‘Ô‚ª•Ï‰»‚µ‚½‚Æ‚«‚É”­‰Î‚·‚éƒCƒxƒ“ƒg
+    /// ï¿½Fï¿½ï¿½ï¿½ï¿½Ô‚ï¿½ï¿½Ï‰ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ‚ï¿½ï¿½É”ï¿½ï¿½Î‚ï¿½ï¿½ï¿½Cï¿½xï¿½ï¿½ï¿½g
     /// (bool isRecognized, string objectName)
     /// </summary>
     public event Action<bool, string> OnRecognitionStateChanged;
-    // ššš ’Ç‰ÁI—¹ ššš
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½ï¿½Iï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 
     // --- [Startup Mode Static Variable] ---
@@ -113,12 +113,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     [Range(0.5f, 1.0f)] public float similarityThreshold = 0.85f;
     [Range(0.1f, 2.0f)] public float compareInterval = 0.2f;
 
-    // ššš ’Ç‰Á: ”F¯‘r¸‚Ü‚Å‚Ì—P—\ŠÔ ššš
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½: ï¿½Fï¿½ï¿½ï¿½rï¿½ï¿½ï¿½Ü‚Å‚Ì—Pï¿½\ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     [Header("Recognition Loss Settings")]
-    [Tooltip("•¨‘Ì‚ªŒ©‚¦‚È‚­‚È‚Á‚Ä‚©‚ç”F¯ƒtƒ‰ƒO‚ğ0‚É‚·‚é‚Ü‚Å‚Ì—P—\ŠÔ(•b)")]
+    [Tooltip("Time in seconds to wait before considering the object lost after last recognition.")]
     [Range(0.1f, 5.0f)] public float recognitionLossDelay = 1.0f;
     private float lastRecognitionTime = 0f;
-    // ššš ’Ç‰ÁI—¹ ššš
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½ï¿½Iï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 
     // --- Private Variables ---
@@ -138,7 +138,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         Debug.Log($"Returning to {sceneAndPanelTarget} and stopping camera...");
 
-        // 1. ƒJƒƒ‰‚ğŠmÀ‚É’â~‚³‚¹‚é (OnDisable‚ğŒÄ‚Ô)
+        // 1. ï¿½Jï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½mï¿½ï¿½ï¿½É’ï¿½~ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (OnDisableï¿½ï¿½ï¿½Ä‚ï¿½)
         if (objectMatcherRootPanel != null)
         {
             objectMatcherRootPanel.SetActive(false);
@@ -148,7 +148,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.LogError("objectMatcherRootPanel is not set!");
         }
 
-        // 2. ƒV[ƒ“ƒ[ƒ_[‚ğŒÄ‚Ño‚·
+        // 2. ï¿½Vï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½[ï¿½_ï¿½[ï¿½ï¿½ï¿½Ä‚Ñoï¿½ï¿½
         if (sceneLoader != null)
         {
             sceneLoader.LoadSceneAndSetPanel(sceneAndPanelTarget);
@@ -158,7 +158,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.LogError("AdvancedSceneLoader (sceneLoader) is not assigned in the Inspector!");
         }
     }
-    // --- £££ ---
+    // --- ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ---
 
     // Initialize in Awake()
     void Awake()
@@ -252,7 +252,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             if (registerCameraPanel != null) registerCameraPanel.SetActive(false);
 
             currentMode = AppMode.Recognition;
-            if (resultText != null) resultText.text = "‘{õ’†...";
+            if (resultText != null) resultText.text = "ï¿½{ï¿½ï¿½ï¿½ï¿½...";
             if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
             if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
         }
@@ -276,14 +276,20 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             webcamTexture.Stop();
         }
 
-        // ššš ’Ç‰Á: ƒJƒƒ‰’â~‚É”F¯ƒtƒ‰ƒO‚ğƒŠƒZƒbƒg ššš
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½: ï¿½Jï¿½ï¿½ï¿½ï¿½ï¿½ï¿½~ï¿½ï¿½ï¿½É”Fï¿½ï¿½ï¿½tï¿½ï¿½ï¿½Oï¿½ï¿½ï¿½ï¿½ï¿½Zï¿½bï¿½g ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         UpdateRecognitionState(false, "");
-        // ššš ’Ç‰ÁI—¹ ššš
+        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½ï¿½Iï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     }
 
 
     void Update()
     {
+
+        if (webcamTexture != null && webcamTexture.isPlaying && webcamTexture.didUpdateThisFrame)
+        {
+            UpdateCameraDisplayOrientation();
+        }
+
         // Only run FindObject() in Talk mode
         if (currentMode == AppMode.Recognition && DesiredMode == StartupMode.Talk &&
             webcamTexture != null && webcamTexture.didUpdateThisFrame && database != null && database.Count > 0)
@@ -292,19 +298,19 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             {
                 lastCompareTime = Time.time;
 
-                // ššš •ÏX: FindObject‚ÌŒÄ‚Ño‚µ‚Æ–Œãˆ— ššš
+                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ÏX: FindObjectï¿½ÌŒÄ‚Ñoï¿½ï¿½ï¿½Æï¿½ï¿½ãˆï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                 bool recognized = FindObject();
 
-                // ”F¯‚³‚ê‚Ä‚¢‚È‚¢ê‡A—P—\ŠÔ‚ğƒ`ƒFƒbƒN
+                // ï¿½Fï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½È‚ï¿½ï¿½ê‡ï¿½Aï¿½Pï¿½\ï¿½ï¿½ï¿½Ô‚ï¿½ï¿½`ï¿½Fï¿½bï¿½N
                 if (!recognized)
                 {
-                    // Šù‚É”F¯’†(1)‚Å‚ ‚èA‚©‚ÂÅŒã‚Ì”F¯‚©‚ç—P—\ŠÔ‚ğ’´‚¦‚½ê‡
+                    // ï¿½ï¿½ï¿½É”Fï¿½ï¿½ï¿½ï¿½(1)ï¿½Å‚ï¿½ï¿½ï¿½Aï¿½ï¿½ï¿½ÂÅŒï¿½Ì”Fï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Pï¿½\ï¿½ï¿½ï¿½Ô‚ğ’´‚ï¿½ï¿½ï¿½ï¿½ê‡
                     if (IsObjectRecognized == 1 && Time.time - lastRecognitionTime > recognitionLossDelay)
                     {
                         UpdateRecognitionState(false, "");
                     }
                 }
-                // ššš •ÏXI—¹ ššš
+                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ÏXï¿½Iï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             }
         }
     }
@@ -331,38 +337,38 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         Debug.Log("EmbeddingObjectMatcher OnDestroy completed.");
     }
 
-    // ššš ’Ç‰Á: ”F¯ó‘Ô‚ğXV‚·‚éƒƒ\ƒbƒh ššš
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½: ï¿½Fï¿½ï¿½ï¿½ï¿½Ô‚ï¿½ï¿½Xï¿½Vï¿½ï¿½ï¿½éƒï¿½\ï¿½bï¿½h ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     /// <summary>
-    /// •¨‘Ì”F¯ó‘Ô‚ğXV‚µA•Ï‰»‚ª‚ ‚ê‚ÎƒCƒxƒ“ƒg‚ğ”­‰Î‚µ‚Ü‚·
+    /// ï¿½ï¿½ï¿½Ì”Fï¿½ï¿½ï¿½ï¿½Ô‚ï¿½ï¿½Xï¿½Vï¿½ï¿½ï¿½Aï¿½Ï‰ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÎƒCï¿½xï¿½ï¿½ï¿½gï¿½ğ”­‰Î‚ï¿½ï¿½Ü‚ï¿½
     /// </summary>
-    /// <param name="isRecognized">”F¯‚³‚ê‚½‚©‚Ç‚¤‚©</param>
-    /// <param name="objectName">”F¯‚³‚ê‚½•¨‘Ì‚Ì–¼‘O (”F¯OFF‚Í "" ‚ğŠú‘Ò)</param>
+    /// <param name="isRecognized">ï¿½Fï¿½ï¿½ï¿½ï¿½ï¿½ê‚½ï¿½ï¿½ï¿½Ç‚ï¿½ï¿½ï¿½</param>
+    /// <param name="objectName">ï¿½Fï¿½ï¿½ï¿½ï¿½ï¿½ê‚½ï¿½ï¿½ï¿½Ì‚Ì–ï¿½ï¿½O (ï¿½Fï¿½ï¿½OFFï¿½ï¿½ï¿½ï¿½ "" ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)</param>
     private void UpdateRecognitionState(bool isRecognized, string objectName)
     {
         int newState = isRecognized ? 1 : 0;
         string newName = isRecognized ? objectName : "";
 
-        // ó‘Ô‚ª•Ï‰»‚µ‚½ê‡‚Ì‚İˆ— (0->1, 1->0, or 1->"A" -> 1->"B")
+        // ï¿½ï¿½Ô‚ï¿½ï¿½Ï‰ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ê‡ï¿½Ì‚İï¿½ï¿½ï¿½ (0->1, 1->0, or 1->"A" -> 1->"B")
         if (IsObjectRecognized != newState || LastRecognizedObjectName != newName)
         {
             IsObjectRecognized = newState;
             LastRecognizedObjectName = newName;
 
-            // ƒCƒxƒ“ƒg‚ğ”­‰Î
+            // ï¿½Cï¿½xï¿½ï¿½ï¿½gï¿½ğ”­‰ï¿½
             OnRecognitionStateChanged?.Invoke(isRecognized, newName);
 
-            // ƒƒOo—Í
+            // ï¿½ï¿½ï¿½Oï¿½oï¿½ï¿½
             if (isRecognized)
             {
-                Debug.Log($"š •¨‘Ì”F¯: ON (1) - •¨‘Ì–¼: {objectName}");
+                Debug.Log($"â˜… ç‰©ä½“èªè­˜: ON (1) - ç‰©ä½“å: {objectName}");
             }
             else
             {
-                Debug.Log($"š •¨‘Ì”F¯: OFF (0)");
+                Debug.Log($"â˜… ç‰©ä½“èªè­˜: OFF (0)");
             }
         }
     }
-    // ššš ’Ç‰ÁI—¹ ššš
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½ï¿½Iï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
     #region Mode Switching
     private void SwitchToNamingMode()
@@ -461,7 +467,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public void OnPlacementConfirmed()
     {
-        Debug.LogError("<<<<< OnPlacementConfirmed ‚ªÀs‚³‚ê‚Ü‚µ‚½ >>>>>"); // Keep your debug log
+        Debug.LogError("<<<<< OnPlacementConfirmed ï¿½ï¿½ï¿½ï¿½ï¿½sï¿½ï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½ >>>>>"); // Keep your debug log
         Debug.Log("OnPlacementConfirmed called. Calculating positions...");
 
         tempRelativeEyePos = new Vector2(-1, -1);
@@ -512,22 +518,22 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         if (currentMode == AppMode.Recognition)
         {
-            // [C³‘O‚ÌƒƒWƒbƒN]
-            // u”F¯v‰æ–ÊiRegisterCameraPanel ‚Ü‚½‚Í TalkCameraPanelj‚©‚çuƒ‚[ƒh‘I‘ğv‰æ–Ê‚É–ß‚é
+            // [ï¿½Cï¿½ï¿½ï¿½Oï¿½Ìƒï¿½ï¿½Wï¿½bï¿½N]
+            // ï¿½uï¿½Fï¿½ï¿½ï¿½vï¿½ï¿½ÊiRegisterCameraPanel ï¿½Ü‚ï¿½ï¿½ï¿½ TalkCameraPanelï¿½jï¿½ï¿½ï¿½ï¿½uï¿½ï¿½ï¿½[ï¿½hï¿½Iï¿½ï¿½ï¿½vï¿½ï¿½Ê‚É–ß‚ï¿½
 
             Debug.Log("Back button pressed on Recognition panel. Returning to selection panel.");
 
-            // 1. ƒ‚[ƒh‘I‘ğƒpƒlƒ‹‚ğ•\¦‚·‚é
+            // 1. ï¿½ï¿½ï¿½[ï¿½hï¿½Iï¿½ï¿½ï¿½pï¿½lï¿½ï¿½ï¿½ï¿½\ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             if (talkSelectionPanel != null)
             {
                 talkSelectionPanel.SetActive(true);
             }
             else
             {
-                Debug.LogError("talkSelectionPanel ‚ªİ’è‚³‚ê‚Ä‚¢‚Ü‚¹‚ñI");
+                Debug.LogError("talkSelectionPanel ï¿½ï¿½ï¿½İ’è‚³ï¿½ï¿½Ä‚ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½I");
             }
 
-            // 2. ‚±‚ÌƒJƒƒ‰ƒpƒlƒ‹i‚Ìej‚ğ”ñ•\¦‚É‚·‚é (‚±‚ê‚É‚æ‚è OnDisable ‚ªŒÄ‚Î‚êƒJƒƒ‰‚ª’â~‚·‚é)
+            // 2. ï¿½ï¿½ï¿½ÌƒJï¿½ï¿½ï¿½ï¿½ï¿½pï¿½lï¿½ï¿½ï¿½iï¿½Ìeï¿½jï¿½ï¿½ï¿½\ï¿½ï¿½ï¿½É‚ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½É‚ï¿½ï¿½ OnDisable ï¿½ï¿½ï¿½Ä‚Î‚ï¿½Jï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½~ï¿½ï¿½ï¿½ï¿½)
             if (objectMatcherRootPanel != null)
             {
                 Debug.Log("Deactivating objectMatcherRootPanel...");
@@ -535,10 +541,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             }
             else
             {
-                Debug.LogError("objectMatcherRootPanel ‚ªİ’è‚³‚ê‚Ä‚¢‚Ü‚¹‚ñI");
+                Debug.LogError("objectMatcherRootPanel ï¿½ï¿½ï¿½İ’è‚³ï¿½ï¿½Ä‚ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½I");
             }
 
-            // ššš ƒV[ƒ“‚ğƒ[ƒh‚·‚éˆ—‚Í‚±‚±‚É‚Í–³‚¢ ššš
+            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Vï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½[ï¿½hï¿½ï¿½ï¿½éˆï¿½ï¿½ï¿½Í‚ï¿½ï¿½ï¿½ï¿½É‚Í–ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         }
         else if (currentMode == AppMode.Naming)
         {
@@ -571,7 +577,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public void OnConfirmRegistration()
     {
-        Debug.LogError("<<<<< !!! OnConfirmRegistration ‚ªÀs‚³‚ê‚Ü‚µ‚½ !!! >>>>>"); // Keep your debug log
+        Debug.LogError("<<<<< !!! OnConfirmRegistration ï¿½ï¿½ï¿½ï¿½ï¿½sï¿½ï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½ !!! >>>>>"); // Keep your debug log
         Debug.Log("OnConfirmRegistration called.");
 
         if (confirmButton != null) confirmButton.interactable = false;
@@ -778,6 +784,67 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     #endregion
 
     #region Recognition Logic
+
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ìƒï¿½ï¿½\ï¿½bï¿½hï¿½ï¿½ï¿½Û‚ï¿½ï¿½ÆƒNï¿½ï¿½ï¿½Xï¿½ï¿½ï¿½É’Ç‰ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    /// <summary>
+    /// ï¿½Jï¿½ï¿½ï¿½ï¿½ï¿½fï¿½ï¿½ï¿½ï¿½\ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½RawImageï¿½ÌŒï¿½ï¿½ï¿½ï¿½ÆƒAï¿½Xï¿½yï¿½Nï¿½gï¿½ï¿½ï¿½â³ï¿½ï¿½ï¿½Ü‚ï¿½
+    /// </summary>
+    private void UpdateCameraDisplayOrientation()
+    {
+        if (webcamTexture == null || !webcamTexture.isPlaying) return;
+
+        // ï¿½ï¿½ï¿½İƒAï¿½Nï¿½eï¿½Bï¿½uï¿½ÈƒJï¿½ï¿½ï¿½ï¿½ï¿½\ï¿½ï¿½UIï¿½ï¿½Iï¿½ï¿½ (Talkï¿½ï¿½ï¿½[ï¿½hï¿½ï¿½Registerï¿½ï¿½ï¿½[ï¿½hï¿½ï¿½ï¿½Å•ï¿½ï¿½ï¿½)
+        RawImage activeCameraDisplay = null;
+        if (DesiredMode == StartupMode.Talk && talkCameraPanel != null && talkCameraPanel.activeInHierarchy)
+        {
+            activeCameraDisplay = talkCameraDisplay;
+        }
+        else if (DesiredMode == StartupMode.Register && registerCameraPanel != null && registerCameraPanel.activeInHierarchy)
+        {
+            activeCameraDisplay = registerCameraDisplay;
+        }
+
+        // ï¿½Aï¿½Nï¿½eï¿½Bï¿½uï¿½È•\ï¿½ï¿½UIï¿½ï¿½ï¿½È‚ï¿½ï¿½ï¿½Îï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È‚ï¿½
+        if (activeCameraDisplay == null) return;
+
+        // --- ï¿½Aï¿½Xï¿½yï¿½Nï¿½gï¿½ï¿½Ì’ï¿½ï¿½ï¿½ ---
+        float videoRotationAngle = webcamTexture.videoRotationAngle;
+        float videoAspectRatio = (float)webcamTexture.width / webcamTexture.height;
+
+        AspectRatioFitter fitter = activeCameraDisplay.GetComponent<AspectRatioFitter>();
+        if (fitter != null)
+        {
+            // 90ï¿½xï¿½Ü‚ï¿½ï¿½ï¿½270ï¿½xï¿½ï¿½]ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½ê‡ï¿½ÍƒAï¿½Xï¿½yï¿½Nï¿½gï¿½ï¿½ï¿½ï¿½tï¿½ï¿½ï¿½É‚ï¿½ï¿½ï¿½
+            if (Mathf.Abs(videoRotationAngle) == 90 || Mathf.Abs(videoRotationAngle) == 270)
+            {
+                fitter.aspectRatio = 1.0f / videoAspectRatio;
+            }
+            else
+            {
+                fitter.aspectRatio = videoAspectRatio;
+            }
+        }
+
+        // --- ï¿½ï¿½]ï¿½Ì’ï¿½ï¿½ï¿½ ---
+        // RawImageï¿½ï¿½ï¿½Ì‚ÌŒï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Jï¿½ï¿½ï¿½ï¿½ï¿½Ì‰ï¿½]ï¿½Ì‹tï¿½ï¿½ï¿½ï¿½ï¿½Éİ’ï¿½
+        activeCameraDisplay.rectTransform.localEulerAngles = new Vector3(0, 0, -videoRotationAngle);
+
+        // --- ï¿½~ï¿½ï¿½ï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½Oï¿½Ì’ï¿½ï¿½ï¿½ (ï¿½Cï¿½ï¿½ï¿½Jï¿½ï¿½ï¿½ï¿½ï¿½Ìê‡ï¿½É•Kï¿½v) ---
+        // WebCamTextureï¿½ï¿½ï¿½Oï¿½ÊƒJï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½gï¿½ï¿½ï¿½Ä‚ï¿½ï¿½é‚©ï¿½Ç‚ï¿½ï¿½ï¿½ï¿½Ì”ï¿½ï¿½ï¿½ (ï¿½fï¿½oï¿½Cï¿½Xï¿½ï¿½ï¿½ï¿½"Front"ï¿½ï¿½ï¿½Ü‚Ü‚ï¿½é‚©ï¿½È‚ï¿½)
+        bool isFrontFacing = webcamTexture.deviceName.ToLower().Contains("front"); // ï¿½ï¿½ï¿½Ì”ï¿½ï¿½ï¿½ï¿½ï¿½@ï¿½Íƒfï¿½oï¿½Cï¿½Xï¿½Ë‘ï¿½
+        if (webcamTexture.videoVerticallyMirrored) // Textureï¿½ï¿½ï¿½Ì‚ï¿½ï¿½ï¿½ï¿½]ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½é‚©
+        {
+            // Yï¿½Xï¿½Pï¿½[ï¿½ï¿½ï¿½ğ”½“] (ï¿½ã‰ºï¿½ï¿½ï¿½]) - ï¿½Êï¿½Aï¿½ï¿½ï¿½ï¿½ï¿½~ï¿½ï¿½ï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½Oï¿½Í•sï¿½vï¿½È‚ï¿½ï¿½Æ‚ï¿½ï¿½ï¿½ï¿½ï¿½
+            // activeCameraDisplay.rectTransform.localScale = new Vector3(isFrontFacing ? -1 : 1, -1, 1);
+            activeCameraDisplay.rectTransform.localScale = new Vector3(isFrontFacing ? -1 : 1, 1, 1);
+        }
+        else
+        {
+            // Xï¿½Xï¿½Pï¿½[ï¿½ï¿½ï¿½ğ”½“] (ï¿½ï¿½ï¿½Eï¿½ï¿½ï¿½]) - ï¿½Cï¿½ï¿½ï¿½Jï¿½ï¿½ï¿½ï¿½ï¿½Ìê‡
+            activeCameraDisplay.rectTransform.localScale = new Vector3(isFrontFacing ? -1 : 1, 1, 1);
+        }
+    }
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç‰ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü‚Åï¿½ï¿½ï¿½ï¿½ï¿½
     private void LoadRegisteredObjectsFromDatabase()
     {
         if (dbManager == null) { Debug.LogError("DatabaseManager is null! Cannot load objects."); return; }
@@ -849,7 +916,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         Debug.Log($"Successfully loaded {database.Count} objects into memory database.");
     }
 
-    // [C³Ï‚İ] ƒCƒ“ƒfƒbƒNƒXƒ`ƒFƒbƒN‚ğ’Ç‰Á
+    // [ï¿½Cï¿½ï¿½ï¿½Ï‚ï¿½] ï¿½Cï¿½ï¿½ï¿½fï¿½bï¿½Nï¿½Xï¿½`ï¿½Fï¿½bï¿½Nï¿½ï¿½Ç‰ï¿½
     private bool FindObject()
     {
         if (webcamTexture == null || !webcamTexture.isPlaying || database == null || database.Count == 0 || featureDetector == null || matcher == null) return false;
@@ -909,13 +976,13 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                             if (homography != null && !homography.Empty())
                             {
                                 UpdateFacialFeatures(potentialMatch, homography);
-                                if (resultText != null) resultText.text = $"”­Œ©: {potentialMatch.Name}!";
+                                if (resultText != null) resultText.text = $"ç™ºè¦‹: {potentialMatch.Name}!";
                                 Debug.Log($"FindObject finished. Found: True - {potentialMatch.Name}");
 
-                                // ššš ’Ç‰Á: ”F¯¬Œ÷‚Éƒtƒ‰ƒO‚ğXV ššš
+                                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½: ï¿½Fï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Éƒtï¿½ï¿½ï¿½Oï¿½ï¿½ï¿½Xï¿½V ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                                 lastRecognitionTime = Time.time;
                                 UpdateRecognitionState(true, potentialMatch.Name);
-                                // ššš ’Ç‰ÁI—¹ ššš
+                                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ç‰ï¿½ï¿½Iï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
                                 return true; // Success
                             }
@@ -936,7 +1003,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         } // end if (bestSimilarity > similarityThreshold ...)
 
         // Reset UI if no match
-        if (resultText != null) resultText.text = "‘{õ’†...";
+        if (resultText != null) resultText.text = "æœç´¢ä¸­...";
         if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
         if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
         // Debug.Log("FindObject finished. Found: False");
