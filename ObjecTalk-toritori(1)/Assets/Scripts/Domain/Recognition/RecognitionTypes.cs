@@ -12,10 +12,8 @@ namespace ObjecTalk.Domain.Recognition
                 throw new ArgumentException("Recognition samples require a label.", nameof(label));
             }
 
-            EmbeddingMath.ThrowIfInvalid(embedding, nameof(embedding));
-
             Label = label;
-            Embedding = embedding;
+            Embedding = EmbeddingMath.CopyNormalized(embedding, nameof(embedding));
         }
 
         public string Label { get; }

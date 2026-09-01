@@ -6,6 +6,7 @@ namespace ObjecTalk.Domain.Recognition
     public static class EmbeddingMath
     {
         private const float ZeroTolerance = 1e-12f;
+        private const float UnitTolerance = 1e-4f;
 
         public static void NormalizeInPlace(float[] embedding)
         {
@@ -20,23 +21,35 @@ namespace ObjecTalk.Domain.Recognition
 
         public static float? Cosine(float[] left, float[] right)
         {
-            if (!TryGetNorm(left, out var leftNorm) || !TryGetNorm(right, out var rightNorm))
-            {
-                return null;
-            }
-
-            if (left.Length != right.Length)
+            if (left == null || right == null || left.Length == 0 || left.Length != right.Length)
             {
                 return null;
             }
 
             var dot = 0f;
+            var leftNormSquared = 0f;
+            var rightNormSquared = 0f;
+
             for (var i = 0; i < left.Length; i++)
             {
-                dot += left[i] * right[i];
+                var leftValue = left[i];
+                var rightValue = right[i];
+                if (float.IsNaN(leftValue) || float.IsInfinity(leftValue) || float.IsNaN(rightValue) || float.IsInfinity(rightValue))
+                {
+                    return null;
+                }
+
+                dot += leftValue * rightValue;
+                leftNormSquared += leftValue * leftValue;
+                rightNormSquared += rightValue * rightValue;
             }
 
-            return dot / (leftNorm * rightNorm);
+            if (!IsUnitLengthSquared(leftNormSquared) || !IsUnitLengthSquared(rightNormSquared))
+            {
+                return null;
+            }
+
+            return dot;
         }
 
         public static RecognitionCandidate? FindBest(
@@ -60,10 +73,7 @@ namespace ObjecTalk.Domain.Recognition
                 throw new ArgumentOutOfRangeException(nameof(ambiguityMargin), "Ambiguity margin must be finite and non-negative.");
             }
 
-            if (!TryGetNorm(query, out _))
-            {
-                return null;
-            }
+            ThrowIfNotNormalized(query, nameof(query));
 
             var bestScoresByLabel = new Dictionary<string, float>(StringComparer.Ordinal);
 
@@ -135,6 +145,31 @@ namespace ObjecTalk.Domain.Recognition
             return norm;
         }
 
+        internal static float[] CopyNormalized(float[] embedding, string paramName)
+        {
+            var copy = (float[])embedding?.Clone();
+            if (copy == null)
+            {
+                throw new ArgumentException("Embeddings must be non-empty, finite, and non-zero.", paramName);
+            }
+
+            NormalizeInPlace(copy);
+            return copy;
+        }
+
+        internal static void ThrowIfNotNormalized(float[] embedding, string paramName)
+        {
+            if (!TryGetNorm(embedding, out var norm))
+            {
+                throw new ArgumentException("Embeddings must be non-empty, finite, and non-zero.", paramName);
+            }
+
+            if (!IsUnitLength(norm))
+            {
+                throw new ArgumentException("Embeddings must already be L2-normalized.", paramName);
+            }
+        }
+
         private static bool TryGetNorm(float[] embedding, out float norm)
         {
             norm = 0f;
@@ -163,6 +198,16 @@ namespace ObjecTalk.Domain.Recognition
 
             norm = (float)Math.Sqrt(normSquared);
             return true;
+        }
+
+        private static bool IsUnitLength(float norm)
+        {
+            return Math.Abs(norm - 1f) <= UnitTolerance;
+        }
+
+        private static bool IsUnitLengthSquared(float normSquared)
+        {
+            return Math.Abs(normSquared - 1f) <= UnitTolerance;
         }
     }
 }

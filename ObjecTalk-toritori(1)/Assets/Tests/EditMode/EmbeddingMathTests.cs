@@ -26,6 +26,20 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
+        public void RecognitionSample_NormalizesPrivateCopyWithoutMutatingCallerArray()
+        {
+            var source = new[] { 3f, 4f };
+
+            var sample = new RecognitionSample("apple", source);
+
+            Assert.That(sample.Embedding, Is.Not.SameAs(source));
+            Assert.That(source[0], Is.EqualTo(3f));
+            Assert.That(source[1], Is.EqualTo(4f));
+            Assert.That(sample.Embedding[0], Is.EqualTo(0.6f).Within(1e-6f));
+            Assert.That(sample.Embedding[1], Is.EqualTo(0.8f).Within(1e-6f));
+        }
+
+        [Test]
         public void Cosine_ReturnsNoScoreForUnequalLengths()
         {
             var score = EmbeddingMath.Cosine(new[] { 1f, 0f }, new[] { 1f });
@@ -59,6 +73,14 @@ namespace ObjecTalk.Tests.EditMode
                 ("b", new[] { 0.99f, 0.01f }));
 
             Assert.That(EmbeddingMath.FindBest(samples, new[] { 1f, 0f }, 0.8f, 0.02f).HasValue, Is.False);
+        }
+
+        [Test]
+        public void FindBest_RejectsNonUnitQuery()
+        {
+            var samples = Samples(("apple", new[] { 1f, 0f }));
+
+            Assert.Throws<System.ArgumentException>(() => EmbeddingMath.FindBest(samples, new[] { 2f, 0f }, 0.8f, 0.02f));
         }
 
         private static RecognitionSample[] Samples(params (string label, float[] embedding)[] items)
