@@ -1,0 +1,14 @@
+{
+  "name": "ObjecTalk.Domain.Recognition",
+  "rootNamespace": "ObjecTalk.Domain.Recognition",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

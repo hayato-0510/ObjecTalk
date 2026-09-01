@@ -1,0 +1,21 @@
+{
+  "name": "ObjecTalk.EditModeTests",
+  "rootNamespace": "ObjecTalk.Tests.EditMode",
+  "references": [
+    "ObjecTalk.Domain.Recognition"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
