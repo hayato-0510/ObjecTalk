@@ -1,0 +1,11 @@
+fileFormatVersion: 2
+guid: a1e62fcb2f2d4d699e02c070f81768d4
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: mobilenetv3-small-imagenet-fp16-v1
+  assetBundleName:
+  assetBundleVariant:
+  script: {fileID: 11500000, guid: f22407ba6b4157b4a93d0a670bd3dd57, type: 3}
+  dynamicDimConfigs: []

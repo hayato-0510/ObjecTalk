@@ -5,7 +5,8 @@
     "ObjecTalk.Domain.Recognition",
     "ObjecTalk.Database",
     "ObjecTalk.Infrastructure.Database",
-    "SQLiteNet"
+    "SQLiteNet",
+    "Unity.InferenceEngine"
   ],
   "includePlatforms": [
     "Editor"
