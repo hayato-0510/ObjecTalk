@@ -254,14 +254,18 @@ namespace ObjecTalk.Infrastructure.Database
                 rows[i] = Serialize(objectId, sample);
             }
 
-            _connection.RunInTransaction(() =>
+            lock (_connection)
             {
-                _connection.Execute("DELETE FROM recognition_samples WHERE object_id = ?", objectId);
-                foreach (var row in rows)
+                ThrowIfDisposed();
+                _connection.RunInTransaction(() =>
                 {
-                    _connection.Insert(row);
-                }
-            });
+                    _connection.Execute("DELETE FROM recognition_samples WHERE object_id = ?", objectId);
+                    foreach (var row in rows)
+                    {
+                        _connection.Insert(row);
+                    }
+                });
+            }
         }
 
         public IReadOnlyList<RecognitionSampleRecord> LoadValidSamples(
@@ -275,21 +279,66 @@ namespace ObjecTalk.Infrastructure.Database
             }
 
             ValidateVersion(expected);
+            lock (_connection)
+            {
+                ThrowIfDisposed();
+                var ownsTransaction = false;
+                try
+                {
+                    if (!_connection.IsInTransaction)
+                    {
+                        _connection.BeginTransaction();
+                        ownsTransaction = true;
+                    }
+
+                    var loaded = LoadValidSamplesInCurrentSnapshot(userId, expected);
+                    if (ownsTransaction)
+                    {
+                        _connection.Commit();
+                    }
+
+                    return loaded;
+                }
+                catch
+                {
+                    if (ownsTransaction && _connection.IsInTransaction)
+                    {
+                        _connection.Rollback();
+                    }
+
+                    throw;
+                }
+            }
+        }
+
+        private IReadOnlyList<RecognitionSampleRecord> LoadValidSamplesInCurrentSnapshot(
+            string userId,
+            RecognitionDataVersion expected)
+        {
             var metadataRows = _connection.Query<RecognitionSampleMetadataRow>(
                 "SELECT rs.object_id, rs.sample_index, rs.embedding_dimension, "
-                + "length(rs.embedding_blob) AS embedding_blob_length, "
-                + "length(rs.keypoint_blob) AS keypoint_blob_length, "
+                + "length(CAST(rs.embedding_blob AS BLOB)) AS embedding_blob_length, "
+                + "length(CAST(rs.keypoint_blob AS BLOB)) AS keypoint_blob_length, "
                 + "rs.descriptor_rows, rs.descriptor_columns, rs.descriptor_type, "
-                + "length(rs.descriptor_blob) AS descriptor_blob_length, "
+                + "length(CAST(rs.descriptor_blob AS BLOB)) AS descriptor_blob_length, "
                 + "rs.image_width, rs.image_height "
                 + "FROM recognition_samples rs "
                 + "INNER JOIN objects o ON o.object_id = rs.object_id "
                 + "WHERE o.user_id = ? AND rs.schema_version = ? AND rs.model_version = ? "
-                + "AND rs.preprocessing_version = ? ORDER BY rs.object_id, rs.sample_index",
+                + "AND rs.preprocessing_version = ? "
+                + "AND typeof(rs.embedding_blob) = 'blob' AND typeof(rs.keypoint_blob) = 'blob' "
+                + "AND typeof(rs.descriptor_blob) = 'blob' "
+                + "AND length(CAST(rs.embedding_blob AS BLOB)) BETWEEN 1 AND ? "
+                + "AND length(CAST(rs.keypoint_blob AS BLOB)) BETWEEN 1 AND ? "
+                + "AND length(CAST(rs.descriptor_blob AS BLOB)) BETWEEN 1 AND ? "
+                + "ORDER BY rs.object_id, rs.sample_index",
                 userId,
                 expected.SchemaVersion,
                 expected.ModelVersion,
-                expected.PreprocessingVersion);
+                expected.PreprocessingVersion,
+                MaximumEmbeddingDimension * sizeof(float),
+                MaximumKeypointBlobBytes,
+                MaximumDescriptorBlobBytes);
 
             var loaded = new List<RecognitionSampleRecord>();
             foreach (var group in metadataRows.GroupBy(row => row.ObjectId, StringComparer.Ordinal))
@@ -346,8 +395,11 @@ namespace ObjecTalk.Infrastructure.Database
                 + "AND schema_version = ? AND model_version = ? AND preprocessing_version = ? "
                 + "AND embedding_dimension = ? AND descriptor_rows = ? AND descriptor_columns = ? "
                 + "AND descriptor_type = ? AND image_width = ? AND image_height = ? "
-                + "AND length(embedding_blob) = ? AND length(keypoint_blob) = ? "
-                + "AND length(descriptor_blob) = ? LIMIT 1",
+                + "AND typeof(embedding_blob) = 'blob' AND typeof(keypoint_blob) = 'blob' "
+                + "AND typeof(descriptor_blob) = 'blob' "
+                + "AND length(CAST(embedding_blob AS BLOB)) = ? "
+                + "AND length(CAST(keypoint_blob AS BLOB)) = ? "
+                + "AND length(CAST(descriptor_blob AS BLOB)) = ? LIMIT 1",
                 metadata.ObjectId,
                 metadata.SampleIndex,
                 expected.SchemaVersion,
@@ -369,18 +421,22 @@ namespace ObjecTalk.Infrastructure.Database
         {
             ThrowIfDisposed();
             ValidateVersion(expected);
-            _connection.RunInTransaction(() =>
+            lock (_connection)
             {
-                _connection.Execute(
-                    "DELETE FROM recognition_samples "
-                    + "WHERE schema_version <> ? OR model_version <> ? OR preprocessing_version <> ?",
-                    expected.SchemaVersion,
-                    expected.ModelVersion,
-                    expected.PreprocessingVersion);
-                _connection.Execute(
-                    "UPDATE objects SET feature_vector_blob = NULL, keypoints_blob = NULL, descriptors_blob = NULL");
-                _connection.Execute("UPDATE object_features SET feature_vector_blob = NULL");
-            });
+                ThrowIfDisposed();
+                _connection.RunInTransaction(() =>
+                {
+                    _connection.Execute(
+                        "DELETE FROM recognition_samples "
+                        + "WHERE schema_version <> ? OR model_version <> ? OR preprocessing_version <> ?",
+                        expected.SchemaVersion,
+                        expected.ModelVersion,
+                        expected.PreprocessingVersion);
+                    _connection.Execute(
+                        "UPDATE objects SET feature_vector_blob = NULL, keypoints_blob = NULL, descriptors_blob = NULL");
+                    _connection.Execute("UPDATE object_features SET feature_vector_blob = NULL");
+                });
+            }
         }
 
         public void DeleteSamples(string objectId)
@@ -391,21 +447,28 @@ namespace ObjecTalk.Infrastructure.Database
                 throw new ArgumentException("An object id is required.", nameof(objectId));
             }
 
-            _connection.RunInTransaction(() =>
-                _connection.Execute("DELETE FROM recognition_samples WHERE object_id = ?", objectId));
+            lock (_connection)
+            {
+                ThrowIfDisposed();
+                _connection.RunInTransaction(() =>
+                    _connection.Execute("DELETE FROM recognition_samples WHERE object_id = ?", objectId));
+            }
         }
 
         public void Dispose()
         {
-            if (_disposed)
+            lock (_connection)
             {
-                return;
-            }
+                if (_disposed)
+                {
+                    return;
+                }
 
-            _disposed = true;
-            if (_ownsConnection)
-            {
-                _connection.Dispose();
+                _disposed = true;
+                if (_ownsConnection)
+                {
+                    _connection.Dispose();
+                }
             }
         }
 

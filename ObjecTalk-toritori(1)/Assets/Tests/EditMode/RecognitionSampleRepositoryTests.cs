@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using NUnit.Framework;
 using ObjecTalk.Infrastructure.Database;
 using SQLite;
@@ -240,6 +241,149 @@ namespace ObjecTalk.Tests.EditMode
                     allocatedBytes,
                     Is.LessThan(maximumAllowedAllocationBytes),
                     "Invalid BLOB payloads must be rejected from scalar length metadata before sqlite-net materializes them.");
+            }
+        }
+
+        [Test]
+        public void LoadValidSamples_TextBlobWithEarlyNull_IsRejectedWithoutMaterializingPayload()
+        {
+            const int corruptTextBytes = 16 * 1024 * 1024;
+            const long maximumAllowedAllocationBytes = 2 * 1024 * 1024;
+            CreateOwningObject("object-1");
+            using (var repository = new RecognitionSampleRepository(_databasePath))
+            {
+                repository.SaveSamples("object-1", CreateSamples(CurrentVersion));
+            }
+
+            var corruptTextPayload = new byte[corruptTextBytes];
+            for (var i = 0; i < corruptTextPayload.Length; i++)
+            {
+                corruptTextPayload[i] = (byte)'x';
+            }
+
+            corruptTextPayload[0] = (byte)'A';
+            corruptTextPayload[1] = (byte)'B';
+            corruptTextPayload[2] = (byte)'C';
+            corruptTextPayload[3] = (byte)'D';
+            corruptTextPayload[4] = (byte)'E';
+            corruptTextPayload[5] = (byte)'F';
+            corruptTextPayload[6] = 0;
+            using (var connection = new SQLiteConnection(_databasePath))
+            {
+                connection.Execute(
+                    "UPDATE recognition_samples SET descriptor_blob = CAST(? AS TEXT) "
+                    + "WHERE object_id = ? AND sample_index = 1",
+                    corruptTextPayload,
+                    "object-1");
+                Assert.That(
+                    connection.ExecuteScalar<string>(
+                        "SELECT typeof(descriptor_blob) FROM recognition_samples "
+                        + "WHERE object_id = ? AND sample_index = 1",
+                        "object-1"),
+                    Is.EqualTo("text"));
+                Assert.That(
+                    connection.ExecuteScalar<int>(
+                        "SELECT length(descriptor_blob) FROM recognition_samples "
+                        + "WHERE object_id = ? AND sample_index = 1",
+                        "object-1"),
+                    Is.EqualTo(6),
+                    "SQLite TEXT length stops at the embedded NUL and can mimic valid descriptor metadata.");
+                Assert.That(
+                    connection.ExecuteScalar<int>(
+                        "SELECT length(CAST(descriptor_blob AS BLOB)) FROM recognition_samples "
+                        + "WHERE object_id = ? AND sample_index = 1",
+                        "object-1"),
+                    Is.EqualTo(corruptTextBytes));
+            }
+
+            corruptTextPayload = null;
+            using (var repository = new RecognitionSampleRepository(_databasePath))
+            {
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                var loaded = repository.LoadValidSamples("user-1", CurrentVersion);
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+                Assert.That(loaded, Is.Empty);
+                Assert.That(
+                    allocatedBytes,
+                    Is.LessThan(maximumAllowedAllocationBytes),
+                    "TEXT values in BLOB columns must be rejected by storage class before payload materialization.");
+            }
+        }
+
+        [Test]
+        public void LoadValidSamples_ConcurrentAtomicSave_ReturnsOneCompleteGeneration()
+        {
+            CreateOwningObject("object-1");
+            using (var repository = new RecognitionSampleRepository(_databasePath))
+            {
+                repository.SaveSamples("object-1", CreateSamples(CurrentVersion));
+            }
+
+            using (var loadConnection = new SQLiteConnection(_databasePath))
+            using (var loadRepository = new RecognitionSampleRepository(loadConnection))
+            using (var writerRepository = new RecognitionSampleRepository(_databasePath))
+            using (var secondPayloadRead = new ManualResetEventSlim(false))
+            using (var writerFinished = new ManualResetEventSlim(false))
+            {
+                loadConnection.EnableWriteAheadLogging();
+                var payloadReadCount = 0;
+                loadConnection.Trace = true;
+                loadConnection.Tracer = sql =>
+                {
+                    if (!sql.Contains("SELECT * FROM recognition_samples"))
+                    {
+                        return;
+                    }
+
+                    if (Interlocked.Increment(ref payloadReadCount) == 2)
+                    {
+                        secondPayloadRead.Set();
+                        if (!writerFinished.Wait(TimeSpan.FromSeconds(5)))
+                        {
+                            throw new TimeoutException("Concurrent sample replacement did not finish at the payload barrier.");
+                        }
+                    }
+                };
+
+                Exception writerFailure = null;
+                var writer = new Thread(() =>
+                {
+                    try
+                    {
+                        if (!secondPayloadRead.Wait(TimeSpan.FromSeconds(5)))
+                        {
+                            throw new TimeoutException("Load did not reach the second payload query.");
+                        }
+
+                        writerRepository.SaveSamples("object-1", new[]
+                        {
+                            CreateSample(0, CurrentVersion, 101f),
+                            CreateSample(1, CurrentVersion, 102f),
+                            CreateSample(2, CurrentVersion, 103f)
+                        });
+                    }
+                    catch (Exception exception)
+                    {
+                        writerFailure = exception;
+                    }
+                    finally
+                    {
+                        writerFinished.Set();
+                    }
+                });
+
+                writer.Start();
+                var loaded = loadRepository.LoadValidSamples("user-1", CurrentVersion);
+                Assert.That(writer.Join(TimeSpan.FromSeconds(5)), Is.True, "Writer thread did not terminate.");
+                Assert.That(writerFailure, Is.Null);
+
+                var loadedGeneration = loaded.Select(sample => sample.Embedding[0]).ToArray();
+                Assert.That(
+                    loadedGeneration.SequenceEqual(new[] { 1f, 2f, 3f })
+                    || loadedGeneration.SequenceEqual(new[] { 101f, 102f, 103f }),
+                    Is.True,
+                    $"Loaded a mixed generation: [{string.Join(", ", loadedGeneration)}]");
             }
         }
 
