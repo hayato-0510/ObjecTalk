@@ -1,0 +1,16 @@
+{
+  "name": "ObjecTalk.Infrastructure.Vision.Preprocessing",
+  "rootNamespace": "ObjecTalk.Infrastructure.Vision",
+  "references": [
+    "ObjecTalk.Domain.Recognition"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
