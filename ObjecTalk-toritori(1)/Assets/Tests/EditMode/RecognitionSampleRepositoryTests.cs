@@ -92,6 +92,36 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
+        public void SaveSamples_MixedVersionReplacement_DoesNotChangeExistingRows()
+        {
+            CreateOwningObject("object-1");
+            using (var repository = new RecognitionSampleRepository(_databasePath))
+            {
+                repository.SaveSamples("object-1", CreateSamples(CurrentVersion));
+
+                var mismatchedVersions = new[]
+                {
+                    new RecognitionDataVersion(2, "model-v2", "rgb-224-v1"),
+                    new RecognitionDataVersion(1, "other-model", "rgb-224-v1"),
+                    new RecognitionDataVersion(1, "model-v2", "other-preprocessing")
+                };
+
+                foreach (var mismatchedVersion in mismatchedVersions)
+                {
+                    var mixedVersions = CreateSamples(CurrentVersion).ToArray();
+                    mixedVersions[2] = CreateSample(2, mismatchedVersion, 99f);
+
+                    Assert.Throws<ArgumentException>(() =>
+                        repository.SaveSamples("object-1", mixedVersions));
+
+                    var loaded = repository.LoadValidSamples("user-1", CurrentVersion);
+                    Assert.That(loaded, Has.Count.EqualTo(3));
+                    Assert.That(loaded.Select(sample => sample.Embedding[0]), Is.EqualTo(new[] { 1f, 2f, 3f }));
+                }
+            }
+        }
+
+        [Test]
         public void LoadValidSamples_ExactlyThreeSamples_RoundTripsAllMetadata()
         {
             CreateOwningObject("object-1");
@@ -168,6 +198,48 @@ namespace ObjecTalk.Tests.EditMode
                 var loaded = repository.LoadValidSamples("user-1", CurrentVersion);
                 Assert.That(loaded, Has.Count.EqualTo(3));
                 Assert.That(loaded.All(sample => sample.ObjectId == "valid-object"), Is.True);
+            }
+        }
+
+        [Test]
+        public void LoadValidSamples_OversizedCorruptBlob_IsRejectedWithoutMaterializingPayload()
+        {
+            const int maximumValidBlobBytes = 8 * 1024 * 1024;
+            const int oversizedBlobBytes = 16 * 1024 * 1024;
+            const long maximumAllowedAllocationBytes = 2 * 1024 * 1024;
+            CreateOwningObject("object-1");
+            using (var repository = new RecognitionSampleRepository(_databasePath))
+            {
+                repository.SaveSamples("object-1", CreateSamples(CurrentVersion));
+            }
+
+            using (var connection = new SQLiteConnection(_databasePath))
+            {
+                connection.Execute(
+                    "UPDATE recognition_samples SET descriptor_rows = 4096, descriptor_columns = 512, "
+                    + "descriptor_type = 5, descriptor_blob = zeroblob(?) "
+                    + "WHERE object_id = ? AND sample_index = 0",
+                    maximumValidBlobBytes,
+                    "object-1");
+                connection.Execute(
+                    "UPDATE recognition_samples SET descriptor_rows = 1, descriptor_columns = 1, "
+                    + "descriptor_type = 0, descriptor_blob = zeroblob(?) "
+                    + "WHERE object_id = ? AND sample_index = 1",
+                    oversizedBlobBytes,
+                    "object-1");
+            }
+
+            using (var repository = new RecognitionSampleRepository(_databasePath))
+            {
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                var loaded = repository.LoadValidSamples("user-1", CurrentVersion);
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+                Assert.That(loaded, Is.Empty);
+                Assert.That(
+                    allocatedBytes,
+                    Is.LessThan(maximumAllowedAllocationBytes),
+                    "Invalid BLOB payloads must be rejected from scalar length metadata before sqlite-net materializes them.");
             }
         }
 

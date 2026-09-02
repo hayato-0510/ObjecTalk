@@ -220,12 +220,27 @@ namespace ObjecTalk.Infrastructure.Database
 
             var rows = new RecognitionSampleRow[RequiredSamplesPerObject];
             var indexes = new bool[RequiredSamplesPerObject];
+            var batchVersion = default(RecognitionDataVersion);
+            var hasBatchVersion = false;
             for (var i = 0; i < samples.Count; i++)
             {
                 var sample = samples[i];
                 if (sample == null)
                 {
                     throw new ArgumentException("Recognition samples cannot contain null entries.", nameof(samples));
+                }
+
+                ValidateVersion(sample.Version);
+                if (!hasBatchVersion)
+                {
+                    batchVersion = sample.Version;
+                    hasBatchVersion = true;
+                }
+                else if (sample.Version != batchVersion)
+                {
+                    throw new ArgumentException(
+                        "All recognition samples in a batch must use the same data version.",
+                        nameof(samples));
                 }
 
                 if (sample.SampleIndex < 0
@@ -260,17 +275,42 @@ namespace ObjecTalk.Infrastructure.Database
             }
 
             ValidateVersion(expected);
-            var rows = _connection.Query<RecognitionSampleRow>(
-                "SELECT rs.* FROM recognition_samples rs "
+            var metadataRows = _connection.Query<RecognitionSampleMetadataRow>(
+                "SELECT rs.object_id, rs.sample_index, rs.embedding_dimension, "
+                + "length(rs.embedding_blob) AS embedding_blob_length, "
+                + "length(rs.keypoint_blob) AS keypoint_blob_length, "
+                + "rs.descriptor_rows, rs.descriptor_columns, rs.descriptor_type, "
+                + "length(rs.descriptor_blob) AS descriptor_blob_length, "
+                + "rs.image_width, rs.image_height "
+                + "FROM recognition_samples rs "
                 + "INNER JOIN objects o ON o.object_id = rs.object_id "
-                + "WHERE o.user_id = ? ORDER BY rs.object_id, rs.sample_index",
-                userId);
+                + "WHERE o.user_id = ? AND rs.schema_version = ? AND rs.model_version = ? "
+                + "AND rs.preprocessing_version = ? ORDER BY rs.object_id, rs.sample_index",
+                userId,
+                expected.SchemaVersion,
+                expected.ModelVersion,
+                expected.PreprocessingVersion);
 
             var loaded = new List<RecognitionSampleRecord>();
-            foreach (var group in rows.GroupBy(row => row.ObjectId, StringComparer.Ordinal))
+            foreach (var group in metadataRows.GroupBy(row => row.ObjectId, StringComparer.Ordinal))
             {
                 var orderedRows = group.OrderBy(row => row.SampleIndex).ToArray();
                 if (orderedRows.Length != RequiredSamplesPerObject)
+                {
+                    continue;
+                }
+
+                var metadataIsComplete = true;
+                for (var i = 0; i < orderedRows.Length; i++)
+                {
+                    if (orderedRows[i].SampleIndex != i || !IsValidSerializedMetadata(orderedRows[i]))
+                    {
+                        metadataIsComplete = false;
+                        break;
+                    }
+                }
+
+                if (!metadataIsComplete)
                 {
                     continue;
                 }
@@ -279,8 +319,8 @@ namespace ObjecTalk.Infrastructure.Database
                 var isComplete = true;
                 for (var i = 0; i < orderedRows.Length; i++)
                 {
-                    if (orderedRows[i].SampleIndex != i
-                        || !TryDeserialize(orderedRows[i], expected, out objectSamples[i]))
+                    if (!TryLoadPayload(orderedRows[i], expected, out var payload)
+                        || !TryDeserialize(payload, expected, out objectSamples[i]))
                     {
                         isComplete = false;
                         break;
@@ -294,6 +334,35 @@ namespace ObjecTalk.Infrastructure.Database
             }
 
             return loaded;
+        }
+
+        private bool TryLoadPayload(
+            RecognitionSampleMetadataRow metadata,
+            RecognitionDataVersion expected,
+            out RecognitionSampleRow payload)
+        {
+            payload = _connection.FindWithQuery<RecognitionSampleRow>(
+                "SELECT * FROM recognition_samples WHERE object_id = ? AND sample_index = ? "
+                + "AND schema_version = ? AND model_version = ? AND preprocessing_version = ? "
+                + "AND embedding_dimension = ? AND descriptor_rows = ? AND descriptor_columns = ? "
+                + "AND descriptor_type = ? AND image_width = ? AND image_height = ? "
+                + "AND length(embedding_blob) = ? AND length(keypoint_blob) = ? "
+                + "AND length(descriptor_blob) = ? LIMIT 1",
+                metadata.ObjectId,
+                metadata.SampleIndex,
+                expected.SchemaVersion,
+                expected.ModelVersion,
+                expected.PreprocessingVersion,
+                metadata.EmbeddingDimension,
+                metadata.DescriptorRows,
+                metadata.DescriptorColumns,
+                metadata.DescriptorType,
+                metadata.ImageWidth,
+                metadata.ImageHeight,
+                metadata.EmbeddingBlobLength,
+                metadata.KeypointBlobLength,
+                metadata.DescriptorBlobLength);
+            return payload != null;
         }
 
         public void InvalidateObsolete(RecognitionDataVersion expected)
@@ -457,20 +526,61 @@ namespace ObjecTalk.Infrastructure.Database
             int imageWidth,
             int imageHeight)
         {
+            if (embeddingBlob == null || keypointBlob == null || descriptorBlob == null)
+            {
+                return false;
+            }
+
+            return IsValidSerializedMetadata(
+                embeddingDimension,
+                embeddingBlob.Length,
+                keypointBlob.Length,
+                descriptorRows,
+                descriptorColumns,
+                descriptorType,
+                descriptorBlob.Length,
+                imageWidth,
+                imageHeight);
+        }
+
+        private static bool IsValidSerializedMetadata(RecognitionSampleMetadataRow row)
+        {
+            return row != null && IsValidSerializedMetadata(
+                row.EmbeddingDimension,
+                row.EmbeddingBlobLength,
+                row.KeypointBlobLength,
+                row.DescriptorRows,
+                row.DescriptorColumns,
+                row.DescriptorType,
+                row.DescriptorBlobLength,
+                row.ImageWidth,
+                row.ImageHeight);
+        }
+
+        private static bool IsValidSerializedMetadata(
+            int embeddingDimension,
+            long embeddingBlobLength,
+            long keypointBlobLength,
+            int descriptorRows,
+            int descriptorColumns,
+            int descriptorType,
+            long descriptorBlobLength,
+            int imageWidth,
+            int imageHeight)
+        {
             if (embeddingDimension <= 0
                 || embeddingDimension > MaximumEmbeddingDimension
-                || embeddingBlob == null
-                || embeddingBlob.Length != (long)embeddingDimension * sizeof(float))
+                || embeddingBlobLength != (long)embeddingDimension * sizeof(float))
             {
                 return false;
             }
 
             return IsValidNonEmbeddingMetadata(
-                keypointBlob,
+                keypointBlobLength,
                 descriptorRows,
                 descriptorColumns,
                 descriptorType,
-                descriptorBlob,
+                descriptorBlobLength,
                 imageWidth,
                 imageHeight);
         }
@@ -484,16 +594,35 @@ namespace ObjecTalk.Infrastructure.Database
             int imageWidth,
             int imageHeight)
         {
-            if (keypointBlob == null
-                || keypointBlob.Length == 0
-                || keypointBlob.Length > MaximumKeypointBlobBytes
+            return keypointBlob != null
+                && descriptorBlob != null
+                && IsValidNonEmbeddingMetadata(
+                    keypointBlob.Length,
+                    descriptorRows,
+                    descriptorColumns,
+                    descriptorType,
+                    descriptorBlob.Length,
+                    imageWidth,
+                    imageHeight);
+        }
+
+        private static bool IsValidNonEmbeddingMetadata(
+            long keypointBlobLength,
+            int descriptorRows,
+            int descriptorColumns,
+            int descriptorType,
+            long descriptorBlobLength,
+            int imageWidth,
+            int imageHeight)
+        {
+            if (keypointBlobLength <= 0
+                || keypointBlobLength > MaximumKeypointBlobBytes
                 || descriptorRows <= 0
                 || descriptorRows > MaximumDescriptorRows
                 || descriptorColumns <= 0
                 || descriptorColumns > MaximumDescriptorColumns
-                || descriptorBlob == null
-                || descriptorBlob.Length == 0
-                || descriptorBlob.Length > MaximumDescriptorBlobBytes
+                || descriptorBlobLength <= 0
+                || descriptorBlobLength > MaximumDescriptorBlobBytes
                 || imageWidth <= 0
                 || imageWidth > MaximumVerificationImageDimension
                 || imageHeight <= 0
@@ -505,7 +634,7 @@ namespace ObjecTalk.Infrastructure.Database
 
             var expectedDescriptorBytes = (long)descriptorRows * descriptorColumns * elementSize;
             return expectedDescriptorBytes <= MaximumDescriptorBlobBytes
-                && descriptorBlob.Length == expectedDescriptorBytes;
+                && descriptorBlobLength == expectedDescriptorBytes;
         }
 
         private static bool TryGetOpenCvElementSize(int descriptorType, out int elementSize)
@@ -655,6 +784,42 @@ namespace ObjecTalk.Infrastructure.Database
 
             [Column("descriptor_blob")]
             public byte[] DescriptorBlob { get; set; }
+
+            [Column("image_width")]
+            public int ImageWidth { get; set; }
+
+            [Column("image_height")]
+            public int ImageHeight { get; set; }
+        }
+
+        private sealed class RecognitionSampleMetadataRow
+        {
+            [Column("object_id")]
+            public string ObjectId { get; set; }
+
+            [Column("sample_index")]
+            public int SampleIndex { get; set; }
+
+            [Column("embedding_dimension")]
+            public int EmbeddingDimension { get; set; }
+
+            [Column("embedding_blob_length")]
+            public long EmbeddingBlobLength { get; set; }
+
+            [Column("keypoint_blob_length")]
+            public long KeypointBlobLength { get; set; }
+
+            [Column("descriptor_rows")]
+            public int DescriptorRows { get; set; }
+
+            [Column("descriptor_columns")]
+            public int DescriptorColumns { get; set; }
+
+            [Column("descriptor_type")]
+            public int DescriptorType { get; set; }
+
+            [Column("descriptor_blob_length")]
+            public long DescriptorBlobLength { get; set; }
 
             [Column("image_width")]
             public int ImageWidth { get; set; }
