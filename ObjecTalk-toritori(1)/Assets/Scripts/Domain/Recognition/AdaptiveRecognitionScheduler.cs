@@ -24,27 +24,32 @@ namespace ObjecTalk.Domain.Recognition
 
         public double NextAllowedTimeSeconds => _nextAllowedTimeSeconds;
 
-        public bool TryBegin(double nowSeconds)
+        public int? TryBegin(double nowSeconds)
         {
             ThrowIfNonFinite(nowSeconds, nameof(nowSeconds));
 
             if (IsBusy || nowSeconds < _nextAllowedTimeSeconds)
             {
-                return false;
+                return null;
             }
 
             IsBusy = true;
             Generation++;
-            return true;
+            return Generation;
         }
 
-        public void Complete(double nowSeconds, double elapsedSeconds)
+        public bool Complete(int generation, double nowSeconds, double elapsedSeconds)
         {
             ThrowIfNonFinite(nowSeconds, nameof(nowSeconds));
 
-            if (!IsBusy)
+            if (generation < 1)
             {
-                return;
+                throw new ArgumentOutOfRangeException(nameof(generation), "Generation tokens must be positive.");
+            }
+
+            if (!IsBusy || generation != Generation)
+            {
+                return false;
             }
 
             if (double.IsNaN(elapsedSeconds) || double.IsInfinity(elapsedSeconds) || elapsedSeconds < 0d)
@@ -55,6 +60,7 @@ namespace ObjecTalk.Domain.Recognition
             IsBusy = false;
             CurrentIntervalSeconds = Math.Clamp(elapsedSeconds, _minimumIntervalSeconds, _maximumIntervalSeconds);
             _nextAllowedTimeSeconds = nowSeconds + CurrentIntervalSeconds;
+            return true;
         }
 
         public void Cancel()
