@@ -5,7 +5,9 @@
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",
     "ObjecTalk.Domain.Recognition",
-    "ObjecTalk.Infrastructure.Vision.Preprocessing"
+    "ObjecTalk.Infrastructure.Vision.Preprocessing",
+    "ObjecTalk.Infrastructure.AI.Embedding",
+    "Unity.InferenceEngine"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
