@@ -1,0 +1,323 @@
+using ObjecTalk.Infrastructure.Database;
+using SQLite;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using UnityEngine;
+
+[Table("users")]
+public class User
+{
+    [PrimaryKey]
+    public string user_id { get; set; }
+    [Column("name")]
+    public string Name { get; set; }
+    [Column("date_of_birth")]
+    public string DateOfBirth { get; set; }
+    [Column("gmail_address")]
+    public string GmailAddress { get; set; }
+    [Column("is_calendar_sync_enabled")]
+    public bool IsCalendarSyncEnabled { get; set; }
+    [Column("is_weather_sync_enabled")]
+    public bool IsWeatherSyncEnabled { get; set; }
+}
+
+[Table("objects")]
+public class ObjectItem
+{
+    [PrimaryKey]
+    public string object_id { get; set; }
+    [Indexed]
+    public string user_id { get; set; }
+    [Column("name")]
+    public string Name { get; set; }
+    [Column("image_data")]
+    public byte[] ImageData { get; set; }
+    [Column("category")]
+    public string Category { get; set; }
+    [Column("ai_description")]
+    public string AiDescription { get; set; }
+
+    [Column("feature_vector_blob")]
+    public byte[] FeatureVectorBlob { get; set; }
+
+    [Column("keypoints_blob")]
+    public byte[] KeyPointsBlob { get; set; }
+
+    [Column("descriptors_blob")]
+    public byte[] DescriptorsBlob { get; set; }
+
+    [Column("eye_pos_x")]
+    public float EyePositionX { get; set; }
+    [Column("eye_pos_y")]
+    public float EyePositionY { get; set; }
+    [Column("mouth_pos_x")]
+    public float MouthPositionX { get; set; }
+    [Column("mouth_pos_y")]
+    public float MouthPositionY { get; set; }
+    [Column("image_width")]
+    public int ImageWidth { get; set; }
+    [Column("image_height")]
+    public int ImageHeight { get; set; }
+
+    [Column("eye_style_id")]
+    public int EyeStyleId { get; set; }
+    [Column("mouth_style_id")]
+    public int MouthStyleId { get; set; }
+    [Column("personality_prompt")]
+    public string PersonalityPrompt { get; set; }
+
+    //[Column("image_url")]
+    //public string ImageURL { get; set; }
+    [Ignore]
+    public List<Feature> Features { get; set; } = new List<Feature>();
+}
+
+[Table("features")]
+public class Feature
+{
+    [PrimaryKey, AutoIncrement]
+    public int feature_id { get; set; }
+    [Unique]
+    public string name { get; set; }
+}
+
+[Table("object_features")]
+public class ObjectFeature
+{
+    [Indexed]
+    public string object_id { get; set; }
+    [Indexed]
+    public int feature_id { get; set; }
+    // 追加: 特徴ベクトルをバイナリデータとして保存するためのプロパティ
+    [Column("feature_vector_blob")]
+    public byte[] FeatureVectorBlob { get; set; }
+
+    [Column("image_url")]
+    public string ImageURL { get; set; }
+}
+
+public class DatabaseManager : IDisposable
+{
+    private readonly SQLiteConnection _connection;
+    private readonly RecognitionSampleRepository _recognitionSamples;
+    private bool _disposed;
+
+    public DatabaseManager()
+        : this(Path.Combine(Application.persistentDataPath, "objecTalk.sqlite"))
+    {
+    }
+
+    internal DatabaseManager(string dbPath)
+    {
+        if (string.IsNullOrWhiteSpace(dbPath))
+        {
+            throw new ArgumentException("A database path is required.", nameof(dbPath));
+        }
+
+        _connection = new SQLiteConnection(dbPath);
+        _connection.CreateTable<User>();
+        _connection.CreateTable<ObjectItem>();
+        _connection.CreateTable<Feature>();
+        _connection.CreateTable<ObjectFeature>();
+        _recognitionSamples = new RecognitionSampleRepository(_connection);
+        Debug.Log($"データベースのパス: {dbPath}");
+    }
+
+    internal RecognitionSampleRepository RecognitionSamples => _recognitionSamples;
+
+    // ----- ユーザー関連メソッド -----
+
+    public void SaveUser(User user)
+    {
+        _connection.InsertOrReplace(user);
+    }
+
+    public User GetUser(string userId)
+    {
+        return _connection.Find<User>(userId);
+    }
+
+    // ★★★ ここから2つのメソッドを追加 ★★★
+
+    /// <summary>
+    /// 指定されたユーザー名を持つユーザーのメールアドレスを取得します。
+    /// </summary>
+    /// <returns>見つかった場合はメールアドレス、見つからなければnullを返します。</returns>
+    public string GetEmailFromUsername(string username)
+    {
+        // 大文字・小文字を区別しないように検索するのが一般的です
+        var user = _connection.Table<User>().FirstOrDefault(u => u.Name.ToLower() == username.ToLower());
+        return user?.GmailAddress;
+    }
+
+    /// <summary>
+    /// 指定されたユーザー名が既にデータベースに存在するかを確認します。
+    /// </summary>
+    public bool DoesUsernameExist(string username)
+    {
+        // 大文字・小文字を区別しないように検索
+        var count = _connection.Table<User>().Count(u => u.Name.ToLower() == username.ToLower());
+        return count > 0;
+    }
+
+    // ★★★ ここまで ★★★
+
+    // ----- モノと特徴の関連メソッド -----
+
+    public void SaveObjectWithFeatures(ObjectItem item, List<string> featureNames)
+    {
+        _connection.BeginTransaction();
+        try
+        {
+            _connection.InsertOrReplace(item);
+            _connection.Table<ObjectFeature>().Delete(of => of.object_id == item.object_id);
+
+            foreach (var tagName in featureNames)
+            {
+                if (string.IsNullOrWhiteSpace(tagName)) continue;
+                var feature = GetOrCreateFeature(tagName);
+                var objectFeature = new ObjectFeature
+                {
+                    object_id = item.object_id,
+                    feature_id = feature.feature_id
+                };
+                _connection.Insert(objectFeature);
+            }
+            _connection.Commit();
+        }
+        catch (Exception ex)
+        {
+            _connection.Rollback();
+            Debug.LogError($"モノの保存中にエラーが発生しました: {ex.Message}");
+            throw;
+        }
+    }
+
+    public ObjectItem GetObjectWithDetails(string objectId)
+    {
+        var item = _connection.Find<ObjectItem>(objectId);
+        if (item == null) return null;
+
+        var featureIds = _connection.Table<ObjectFeature>()
+                                        .Where(of => of.object_id == objectId)
+                                        .Select(of => of.feature_id)
+                                        .ToList();
+        if (featureIds.Any())
+        {
+            item.Features = _connection.Table<Feature>()
+                                        .Where(f => featureIds.Contains(f.feature_id))
+                                        .ToList();
+        }
+        return item;
+    }
+
+    public List<ObjectItem> GetAllUserObjectsWithDetails(string userId)
+    {
+        var items = _connection.Table<ObjectItem>().Where(o => o.user_id == userId).ToList();
+        foreach (var item in items)
+        {
+            var itemWithDetails = GetObjectWithDetails(item.object_id);
+            if (itemWithDetails != null)
+            {
+                item.Features = itemWithDetails.Features;
+            }
+        }
+        return items;
+    }
+
+    private Feature GetOrCreateFeature(string tagName)
+    {
+        var feature = _connection.Table<Feature>().FirstOrDefault(f => f.name == tagName);
+        if (feature == null)
+        {
+            feature = new Feature { name = tagName };
+            _connection.Insert(feature);
+        }
+        return feature;
+    }
+
+    // ----- デバッグ・管理用メソッド -----
+
+    public List<User> GetAllUsers()
+    {
+        return _connection.Table<User>().ToList();
+    }
+
+    public List<Feature> GetAllFeatures()
+    {
+        return _connection.Table<Feature>().ToList();
+    }
+
+    public List<ObjectItem> GetAllObjects()
+    {
+        return _connection.Table<ObjectItem>().ToList();
+    }
+
+    public List<ObjectFeature> GetAllObjectFeatures()
+    {
+        return _connection.Table<ObjectFeature>().ToList();
+    }
+
+    public string GetDatabaseStats()
+    {
+        var userCount = _connection.Table<User>().Count();
+        var objectCount = _connection.Table<ObjectItem>().Count();
+        var featureCount = _connection.Table<Feature>().Count();
+        var relationCount = _connection.Table<ObjectFeature>().Count();
+        return $"ユーザー: {userCount}, オブジェクト: {objectCount}, 特徴: {featureCount}, 関連付け: {relationCount}";
+    }
+
+    public void ClearAllTables()
+    {
+        _connection.BeginTransaction();
+        try
+        {
+            _connection.DeleteAll<ObjectFeature>();
+            _connection.Execute("DELETE FROM recognition_samples");
+            _connection.DeleteAll<ObjectItem>();
+            _connection.DeleteAll<Feature>();
+            _connection.DeleteAll<User>();
+            _connection.Commit();
+            Debug.Log("全テーブルのデータが削除されました。");
+        }
+        catch (Exception ex)
+        {
+            _connection.Rollback();
+            Debug.LogError($"データベースクリア中にエラーが発生しました: {ex.Message}");
+            throw;
+        }
+    }
+
+    public void DeleteObject(string objectId)
+    {
+        _connection.BeginTransaction();
+        try
+        {
+            _connection.Table<ObjectFeature>().Delete(of => of.object_id == objectId);
+            _connection.Execute("DELETE FROM recognition_samples WHERE object_id = ?", objectId);
+            _connection.Delete<ObjectItem>(objectId);
+            _connection.Commit();
+            Debug.Log($"オブジェクト(ID: {objectId})をデータベースから削除しました。");
+        }
+        catch (Exception ex)
+        {
+            _connection.Rollback();
+            Debug.LogError($"オブジェクトの削除中にエラーが発生しました: {ex.Message}");
+            throw;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _recognitionSamples.Dispose();
+        _connection.Dispose();
+    }
+}

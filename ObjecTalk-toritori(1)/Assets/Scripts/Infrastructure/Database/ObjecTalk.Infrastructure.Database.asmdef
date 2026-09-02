@@ -1,0 +1,16 @@
+{
+  "name": "ObjecTalk.Infrastructure.Database",
+  "rootNamespace": "ObjecTalk.Infrastructure.Database",
+  "references": [
+    "SQLiteNet"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

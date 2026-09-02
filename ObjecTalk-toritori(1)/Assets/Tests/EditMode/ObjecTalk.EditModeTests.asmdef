@@ -2,7 +2,10 @@
   "name": "ObjecTalk.EditModeTests",
   "rootNamespace": "ObjecTalk.Tests.EditMode",
   "references": [
-    "ObjecTalk.Domain.Recognition"
+    "ObjecTalk.Domain.Recognition",
+    "ObjecTalk.Database",
+    "ObjecTalk.Infrastructure.Database",
+    "SQLiteNet"
   ],
   "includePlatforms": [
     "Editor"
