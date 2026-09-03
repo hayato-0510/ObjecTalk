@@ -1,0 +1,14 @@
+{
+  "name": "ObjecTalk.Domain.Conversation",
+  "rootNamespace": "ObjecTalk.Domain.Conversation",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

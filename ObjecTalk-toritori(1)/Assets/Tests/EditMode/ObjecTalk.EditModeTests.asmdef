@@ -10,7 +10,9 @@
     "ObjecTalk.Core.Recognition",
     "ObjecTalk.Infrastructure.Vision.Preprocessing",
     "ObjecTalk.TestDoubles",
-    "ObjecTalk.Infrastructure.AI.Embedding"
+    "ObjecTalk.Infrastructure.AI.Embedding",
+    "ObjecTalk.Domain.Conversation",
+    "ObjecTalk.Core.Conversation"
   ],
   "includePlatforms": [
     "Editor"
