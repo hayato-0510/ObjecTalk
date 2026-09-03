@@ -1,5 +1,5 @@
 using System;
-using ObjecTalk.Domain.Interfaces;
+using ObjecTalk.Core.Recognition;
 using ObjecTalk.Domain.Models;
 using ObjecTalk.Domain.Recognition;
 using OpenCvSharp;
@@ -14,7 +14,7 @@ namespace ObjecTalk.Infrastructure.Vision
     /// explicitly prepared verification frame - never a camera texture cast to
     /// <see cref="Texture2D"/>.
     /// </summary>
-    public sealed class AkazeVerifier : IAkazeVerifier
+    public sealed class AkazeVerifier : ILocalFeatureVerifier
     {
         private readonly float _maximumDescriptorDistance;
 
@@ -133,6 +133,67 @@ namespace ObjecTalk.Infrastructure.Vision
                 new ReadOnlySpan<float>(_distanceBuffer, 0, matches.Length),
                 _maximumDescriptorDistance,
                 minimumMatches);
+        }
+
+        /// <summary>
+        /// Rebuilds a persisted capture. Returns null for a payload whose declared geometry does
+        /// not match its bytes, so one corrupt row cannot stop the rest of the database loading.
+        /// </summary>
+        public LocalFeatureSample Restore(LocalFeatureBlob blob)
+        {
+            ThrowIfDisposed();
+
+            var keypoints = LocalFeatureCodec.DeserializeKeypoints(blob.Keypoints);
+            if (keypoints == null || keypoints.Length == 0)
+            {
+                return null;
+            }
+
+            var descriptors = LocalFeatureCodec.DeserializeDescriptors(blob);
+            if (descriptors == null)
+            {
+                return null;
+            }
+
+            if (descriptors.Rows != keypoints.Length)
+            {
+                descriptors.Dispose();
+                return null;
+            }
+
+            try
+            {
+                return new LocalFeatureSample(
+                    keypoints,
+                    descriptors,
+                    new Size(blob.ImageWidth, blob.ImageHeight));
+            }
+            catch (ArgumentException)
+            {
+                // The sample constructor disposes the matrix before it throws.
+                return null;
+            }
+        }
+
+        ILocalFeatureSample ILocalFeatureVerifier.Extract(Texture2D image)
+        {
+            return Extract(image);
+        }
+
+        ILocalFeatureSample ILocalFeatureVerifier.Restore(LocalFeatureBlob blob)
+        {
+            return Restore(blob);
+        }
+
+        bool ILocalFeatureVerifier.Verify(Texture2D image, ILocalFeatureSample reference, int minimumMatches)
+        {
+            if (reference == null)
+            {
+                throw new ArgumentNullException(nameof(reference));
+            }
+
+            // Only this verifier's own samples carry the OpenCV matrix matching needs.
+            return reference is LocalFeatureSample sample && Verify(image, sample, minimumMatches);
         }
 
         public void Dispose()

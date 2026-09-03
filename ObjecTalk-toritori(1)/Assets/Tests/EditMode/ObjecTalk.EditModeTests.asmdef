@@ -6,7 +6,11 @@
     "ObjecTalk.Database",
     "ObjecTalk.Infrastructure.Database",
     "SQLiteNet",
-    "Unity.InferenceEngine"
+    "Unity.InferenceEngine",
+    "ObjecTalk.Core.Recognition",
+    "ObjecTalk.Infrastructure.Vision.Preprocessing",
+    "ObjecTalk.TestDoubles",
+    "ObjecTalk.Infrastructure.AI.Embedding"
   ],
   "includePlatforms": [
     "Editor"

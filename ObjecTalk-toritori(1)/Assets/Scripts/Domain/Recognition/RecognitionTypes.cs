@@ -53,6 +53,7 @@ namespace ObjecTalk.Domain.Recognition
         public const float DefaultLossGracePeriodSeconds = 0.4f;
         public const float MinimumSupportedRecognitionIntervalSeconds = 0.2f;
         public const float MaximumSupportedRecognitionIntervalSeconds = 0.5f;
+        public const int DefaultMinimumLocalMatchCount = 10;
 
         public RecognitionSettings(float similarityThreshold, float ambiguityMargin)
             : this(
@@ -72,6 +73,25 @@ namespace ObjecTalk.Domain.Recognition
             float lossGracePeriodSeconds,
             float minimumRecognitionIntervalSeconds,
             float maximumRecognitionIntervalSeconds)
+            : this(
+                similarityThreshold,
+                ambiguityMargin,
+                requiredConsecutiveHits,
+                lossGracePeriodSeconds,
+                minimumRecognitionIntervalSeconds,
+                maximumRecognitionIntervalSeconds,
+                DefaultMinimumLocalMatchCount)
+        {
+        }
+
+        public RecognitionSettings(
+            float similarityThreshold,
+            float ambiguityMargin,
+            int requiredConsecutiveHits,
+            float lossGracePeriodSeconds,
+            float minimumRecognitionIntervalSeconds,
+            float maximumRecognitionIntervalSeconds,
+            int minimumLocalMatchCount)
         {
             if (float.IsNaN(similarityThreshold) || float.IsInfinity(similarityThreshold))
             {
@@ -86,6 +106,13 @@ namespace ObjecTalk.Domain.Recognition
             if (requiredConsecutiveHits < 1)
             {
                 throw new ArgumentOutOfRangeException(nameof(requiredConsecutiveHits), "Required consecutive hits must be at least one.");
+            }
+
+            if (minimumLocalMatchCount < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(minimumLocalMatchCount),
+                    "Local verification requires at least one matching descriptor.");
             }
 
             if (float.IsNaN(lossGracePeriodSeconds) || float.IsInfinity(lossGracePeriodSeconds) || lossGracePeriodSeconds < 0f)
@@ -113,6 +140,7 @@ namespace ObjecTalk.Domain.Recognition
             LossGracePeriodSeconds = lossGracePeriodSeconds;
             MinimumRecognitionIntervalSeconds = clampedMinimumIntervalSeconds;
             MaximumRecognitionIntervalSeconds = clampedMaximumIntervalSeconds;
+            MinimumLocalMatchCount = minimumLocalMatchCount;
         }
 
         public float SimilarityThreshold { get; }
@@ -126,6 +154,12 @@ namespace ObjecTalk.Domain.Recognition
         public float MinimumRecognitionIntervalSeconds { get; }
 
         public float MaximumRecognitionIntervalSeconds { get; }
+
+        /// <summary>
+        /// Descriptor matches AKAZE must find before it confirms the best neural candidate.
+        /// Kept here so no production call site hard-codes a verification threshold.
+        /// </summary>
+        public int MinimumLocalMatchCount { get; }
 
         private static float ClampRecognitionInterval(float seconds, string paramName)
         {

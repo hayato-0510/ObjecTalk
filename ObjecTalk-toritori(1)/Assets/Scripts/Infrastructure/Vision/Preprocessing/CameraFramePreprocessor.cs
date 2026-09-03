@@ -10,7 +10,7 @@ namespace ObjecTalk.Infrastructure.Vision
     /// AKAZE. Both buffers are allocated once and reused, so the steady-state loop performs no
     /// per-frame image allocation, and the source is never cast to <see cref="Texture2D"/>.
     /// </summary>
-    public sealed class CameraFramePreprocessor : IDisposable
+    public sealed class CameraFramePreprocessor : IFramePreprocessor
     {
         private readonly int _embeddingSize;
         private readonly int _maximumVerificationSize;
@@ -97,6 +97,28 @@ namespace ObjecTalk.Infrastructure.Vision
             }
 
             return _verificationFrame;
+        }
+
+        /// <summary>
+        /// Drops the reusable surfaces while leaving the preprocessor usable. The next call to
+        /// <see cref="PrepareEmbedding"/> or <see cref="CopyVerificationFrame"/> allocates them
+        /// again, so a paused application can hand its graphics memory back.
+        /// </summary>
+        public void ReleaseBuffers()
+        {
+            ThrowIfDisposed();
+            ReleaseRenderTexture(ref _embeddingTexture);
+            ReleaseRenderTexture(ref _verificationSurface);
+            DestroyObject(_verificationFrame);
+            _verificationFrame = null;
+            _verificationSize = 0;
+        }
+
+        // The concrete return type is more useful to direct callers than the interface's Texture,
+        // and C# does not allow an implicit implementation to widen it.
+        Texture IFramePreprocessor.PrepareEmbedding(Texture source)
+        {
+            return PrepareEmbedding(source);
         }
 
         public void Dispose()

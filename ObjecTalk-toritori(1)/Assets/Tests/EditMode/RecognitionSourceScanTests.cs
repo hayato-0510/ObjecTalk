@@ -16,7 +16,9 @@ namespace ObjecTalk.Tests.EditMode
             "Scripts/Infrastructure/Vision/Preprocessing/CameraFramePreprocessor.cs",
             "Scripts/Infrastructure/Vision/AkazeVerifier.cs",
             "Scripts/Domain/Models/LocalFeatureSample.cs",
-            "Scripts/Domain/Interfaces/IAkazeVerifier.cs"
+            "Scripts/Infrastructure/Vision/LocalFeatureCodec.cs",
+            "Scripts/Core/Recognition/ILocalFeatureVerifier.cs",
+            "Scripts/Core/Recognition/ObjectRecognitionService.cs"
         };
 
         [Test]

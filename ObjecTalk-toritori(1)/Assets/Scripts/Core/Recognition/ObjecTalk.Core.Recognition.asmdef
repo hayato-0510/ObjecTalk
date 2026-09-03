@@ -1,0 +1,19 @@
+{
+  "name": "ObjecTalk.Core.Recognition",
+  "rootNamespace": "ObjecTalk.Core.Recognition",
+  "references": [
+    "ObjecTalk.Domain.Recognition",
+    "ObjecTalk.Infrastructure.AI.Embedding",
+    "ObjecTalk.Infrastructure.Vision.Preprocessing",
+    "ObjecTalk.Infrastructure.Database"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

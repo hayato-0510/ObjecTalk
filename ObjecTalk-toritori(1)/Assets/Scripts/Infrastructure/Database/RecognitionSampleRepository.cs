@@ -100,7 +100,7 @@ namespace ObjecTalk.Infrastructure.Database
         {
         }
 
-        internal RecognitionSampleRecord(
+        public RecognitionSampleRecord(
             string objectId,
             int sampleIndex,
             RecognitionDataVersion version,
@@ -159,7 +159,7 @@ namespace ObjecTalk.Infrastructure.Database
         }
     }
 
-    public sealed class RecognitionSampleRepository : IDisposable
+    public sealed class RecognitionSampleRepository : IRecognitionSampleStore, IDisposable
     {
         public const int RequiredSamplesPerObject = 3;
         public const int MaximumEmbeddingDimension = 576;

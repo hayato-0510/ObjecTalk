@@ -1,5 +1,7 @@
 using System;
+using ObjecTalk.Core.Recognition;
 using ObjecTalk.Domain.Recognition;
+using ObjecTalk.Infrastructure.Vision;
 using OpenCvSharp;
 
 namespace ObjecTalk.Domain.Models
@@ -8,7 +10,7 @@ namespace ObjecTalk.Domain.Models
     /// AKAZE keypoints and descriptors extracted from one bounded verification image.
     /// The instance owns <see cref="Descriptors"/> and must be disposed by whoever created it.
     /// </summary>
-    public sealed class LocalFeatureSample : IDisposable
+    public sealed class LocalFeatureSample : ILocalFeatureSample
     {
         private Mat _descriptors;
 
@@ -50,6 +52,27 @@ namespace ObjecTalk.Domain.Models
         /// <summary>False when the capture is featureless and must be retried.</summary>
         public bool HasFeatures =>
             Keypoints.Length > 0 && _descriptors != null && !_descriptors.IsDisposed && !_descriptors.Empty();
+
+        /// <summary>
+        /// The persistable payload. Only a capture that found features can be serialized; the
+        /// registration flow rejects a featureless capture long before it reaches this point.
+        /// </summary>
+        public LocalFeatureBlob Serialize()
+        {
+            if (!HasFeatures)
+            {
+                throw new InvalidOperationException("A featureless capture cannot be serialized.");
+            }
+
+            return new LocalFeatureBlob(
+                LocalFeatureCodec.SerializeKeypoints(Keypoints),
+                LocalFeatureCodec.SerializeDescriptors(_descriptors),
+                _descriptors.Rows,
+                _descriptors.Cols,
+                _descriptors.Type(),
+                ImageSize.Width,
+                ImageSize.Height);
+        }
 
         public void Dispose()
         {
