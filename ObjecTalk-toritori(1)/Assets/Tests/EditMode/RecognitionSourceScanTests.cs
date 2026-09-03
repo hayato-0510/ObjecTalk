@@ -6,8 +6,8 @@ namespace ObjecTalk.Tests.EditMode
 {
     /// <summary>
     /// Guards the image-pipeline rule that camera frames are copied explicitly rather than cast.
-    /// The scan covers the new recognition pipeline; the legacy Barracuda matcher it replaces is
-    /// still referenced by the old controller and is removed in a later task.
+    /// The scan covers every file in the recognition pipeline; the legacy synchronous matcher it
+    /// replaced was removed with the Barracuda dependency.
     /// </summary>
     public class RecognitionSourceScanTests
     {

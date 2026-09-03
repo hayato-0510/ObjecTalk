@@ -125,7 +125,11 @@ public class DatabaseManager : IDisposable
         Debug.Log($"データベースのパス: {dbPath}");
     }
 
-    internal RecognitionSampleRepository RecognitionSamples => _recognitionSamples;
+    /// <summary>
+    /// The versioned recognition-sample store, sharing this manager's connection so object rows
+    /// and their samples are read and written through one database handle.
+    /// </summary>
+    public IRecognitionSampleStore RecognitionSamples => _recognitionSamples;
 
     // ----- ユーザー関連メソッド -----
 

@@ -10,7 +10,8 @@
     "Unity.InferenceEngine",
     "ObjecTalk.Core.Recognition",
     "ObjecTalk.Infrastructure.Database",
-    "ObjecTalk.TestDoubles"
+    "ObjecTalk.TestDoubles",
+    "SQLiteNet"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

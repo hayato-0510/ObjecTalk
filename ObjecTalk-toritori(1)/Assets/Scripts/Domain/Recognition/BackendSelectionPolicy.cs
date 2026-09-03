@@ -1,3 +1,5 @@
+using System;
+
 namespace ObjecTalk.Domain.Recognition
 {
     /// <summary>Inference backend chosen for embedding extraction.</summary>
@@ -18,6 +20,48 @@ namespace ObjecTalk.Domain.Recognition
     {
         /// <summary>Shown when neither inference backend could be initialized.</summary>
         public const string RecognitionUnavailable = "認識エンジンを初期化できませんでした。物体認識を利用できません。";
+
+        /// <summary>Shown when the embedding model asset is missing or will not import.</summary>
+        public const string ModelUnavailable = "認識モデルを読み込めませんでした。物体認識を利用できません。";
+
+        /// <summary>Shown when the user has refused, or has not yet granted, camera access.</summary>
+        public const string CameraPermissionDenied = "カメラの使用が許可されていません。端末の設定から許可してください。";
+
+        /// <summary>Shown when the device reports no usable camera.</summary>
+        public const string CameraUnavailable = "カメラを利用できません。";
+
+        /// <summary>Shown while recognition is running but nothing is recognized yet.</summary>
+        public const string Searching = "捜索中...";
+
+        /// <summary>Shown when a registration capture found no local features.</summary>
+        public const string RegistrationRetry = "特徴を検出できませんでした。角度を変えてもう一度撮影してください。";
+
+        /// <summary>Shown once all required views are captured.</summary>
+        public const string RegistrationComplete = "撮影が完了しました。";
+
+        /// <summary>
+        /// Shown when persisted features were written by an older model or preprocessing version
+        /// and were therefore discarded. Object names, images, and placement survive.
+        /// </summary>
+        public const string ReRegistrationRequired = "認識データの形式が変わったため、物体の再登録が必要です。";
+
+        /// <summary>Progress while collecting the required views, for example "1/3 枚撮影しました".</summary>
+        public static string RegistrationProgress(int capturedViews, int requiredViews)
+        {
+            if (capturedViews < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(capturedViews), "Captured views cannot be negative.");
+            }
+
+            if (requiredViews < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(requiredViews), "At least one view is required.");
+            }
+
+            return capturedViews >= requiredViews
+                ? RegistrationComplete
+                : $"{capturedViews}/{requiredViews} 枚撮影しました。角度を変えて撮影してください。";
+        }
     }
 
     /// <summary>
