@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
+import { countRawHeaders, createApp } from '../src/app.js';
 
 async function withServer(dependencies, run) {
   const server = createApp(dependencies).listen(0);
@@ -44,6 +45,28 @@ test('requires one strict bearer token', async () => {
     }
     assert.equal(verificationCalls, 0);
   });
+});
+
+test('rejects duplicate raw Authorization headers before verification', async () => {
+  let verificationCalls = 0;
+  await withServer(dependencies({ verifyIdToken: async () => { verificationCalls++; return { uid: 'u' }; } }), async (base) => {
+    const response = await rawRequest(base, [
+      'Authorization', 'Bearer first',
+      'Authorization', 'Bearer second',
+      'Content-Type', 'application/json',
+      'Content-Length', String(Buffer.byteLength(JSON.stringify(validBody))),
+    ], JSON.stringify(validBody));
+    assert.ok(response.status === 400 || response.status === 401);
+    assert.equal(verificationCalls, 0);
+  });
+});
+
+test('counts duplicate Authorization fields from the untouched raw header list', () => {
+  assert.equal(countRawHeaders([
+    'Host', 'localhost',
+    'Authorization', 'Bearer first',
+    'authorization', 'Bearer second',
+  ], 'authorization'), 2);
 });
 
 test('returns SDP only after authentication and validation', async () => {
@@ -94,3 +117,14 @@ test('sanitizes authentication and upstream failures', async () => {
     assert.doesNotMatch(await response.text(), /UPSTREAM_SECRET_BODY/);
   });
 });
+
+function rawRequest(base, headers, body) {
+  return new Promise((resolve, reject) => {
+    const request = http.request(`${base}/api/realtime/calls`, { method: 'POST', headers }, (response) => {
+      response.resume();
+      response.once('end', () => resolve({ status: response.statusCode }));
+    });
+    request.once('error', reject);
+    request.end(body);
+  });
+}

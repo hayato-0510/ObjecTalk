@@ -14,6 +14,9 @@ export function createApp({ verifyIdToken, createRealtimeCall, limiter = createI
   app.use(express.json({ limit: '256kb' }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
   app.post('/api/realtime/calls', async (req, res) => {
+    if (countRawHeaders(req.rawHeaders, 'authorization') !== 1) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
     const token = extractBearerToken(req.get('authorization'));
     if (!token) return res.status(401).json({ error: 'unauthorized' });
     let identity;
@@ -44,6 +47,14 @@ export function createApp({ verifyIdToken, createRealtimeCall, limiter = createI
     return res.status(500).json({ error: 'internal_error' });
   });
   return app;
+}
+
+export function countRawHeaders(rawHeaders, requestedName) {
+  let count = 0;
+  for (let index = 0; index < rawHeaders.length; index += 2) {
+    if (String(rawHeaders[index]).toLowerCase() === requestedName) count += 1;
+  }
+  return count;
 }
 
 function validateBody(body) {
