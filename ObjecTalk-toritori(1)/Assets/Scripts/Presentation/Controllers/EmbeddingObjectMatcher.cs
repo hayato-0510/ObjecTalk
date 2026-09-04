@@ -152,6 +152,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private int _orientedSourceWidth;
     private int _orientedSourceHeight;
     private bool _warnedNoBlitMaterial;
+    // Set when the render texture cannot be created for the current camera size/orientation, so the
+    // rebuild is not re-attempted (and re-logged) every frame; cleared when the source changes.
+    private bool _orientedFrameUnavailable;
 
     /// <summary>Leaves the camera flow: stops the camera and loads the home scene.</summary>
     public void ReturnToHome()
@@ -467,32 +470,53 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         var orientation = FrameOrientation.FromWebCam(
             (int)webcamTexture.videoRotationAngle, webcamTexture.videoVerticallyMirrored);
 
-        if (_orientedFrame != null
-            && _orientedSourceWidth == webcamTexture.width
+        var sourceUnchanged = _orientedSourceWidth == webcamTexture.width
             && _orientedSourceHeight == webcamTexture.height
-            && _frameOrientation.Equals(orientation))
+            && _frameOrientation.Equals(orientation);
+
+        // Nothing to do while the source is unchanged and we already have a frame (or have already
+        // given up on this source). Re-attempting a failed Create() every frame would leak GPU
+        // memory and spam the log.
+        if (sourceUnchanged && (_orientedFrame != null || _orientedFrameUnavailable))
         {
             return;
         }
 
         ReleaseOrientedFrame();
+        _orientedFrameUnavailable = false;
         _frameOrientation = orientation;
         _orientedSourceWidth = webcamTexture.width;
         _orientedSourceHeight = webcamTexture.height;
         var (w, h) = orientation.OrientedSize(webcamTexture.width, webcamTexture.height);
-        _orientedFrame = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32)
+
+        try
         {
-            name = "ObjecTalk Oriented Camera Frame",
-            wrapMode = TextureWrapMode.Clamp,
-            filterMode = FilterMode.Bilinear,
-        };
-        _orientedFrame.Create();
+            _orientedFrame = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32)
+            {
+                name = "ObjecTalk Oriented Camera Frame",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            _orientedFrame.Create();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("EmbeddingObjectMatcher: could not create the oriented camera frame "
+                + $"({e.GetType().Name}: {e.Message}); recognition and preview fall back to the raw "
+                + "camera texture.");
+            ReleaseOrientedFrame();
+            _orientedFrameUnavailable = true;
+            ApplyCameraDisplay(registerCameraDisplay);
+            ApplyCameraDisplay(talkCameraDisplay);
+            return;
+        }
 
         if (!_orientedFrame.IsCreated())
         {
             Debug.LogWarning("EmbeddingObjectMatcher: could not create the oriented camera frame; "
                 + "recognition and preview fall back to the raw camera texture.");
             ReleaseOrientedFrame();
+            _orientedFrameUnavailable = true;
             ApplyCameraDisplay(registerCameraDisplay);
             ApplyCameraDisplay(talkCameraDisplay);
             return;
@@ -512,6 +536,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             _orientQuad = BuildUnitQuad();
         }
+
+        // UVs are constant per orientation, so upload them once here rather than every frame.
+        ApplyOrientedQuadUVs();
 
         ApplyCameraDisplay(registerCameraDisplay);
         ApplyCameraDisplay(talkCameraDisplay);
@@ -541,23 +568,40 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             return;
         }
 
+        var previous = RenderTexture.active;
+        RenderTexture.active = _orientedFrame;
+        GL.PushMatrix();
+        try
+        {
+            GL.LoadOrtho();
+            _orientBlitMaterial.mainTexture = webcamTexture;
+            _orientBlitMaterial.SetPass(0);
+            Graphics.DrawMeshNow(_orientQuad, Vector3.zero, Quaternion.identity);
+        }
+        finally
+        {
+            GL.PopMatrix();
+            RenderTexture.active = previous;
+        }
+    }
+
+    /// <summary>Uploads the source-sample UVs for the current orientation onto the blit quad.</summary>
+    private void ApplyOrientedQuadUVs()
+    {
+        if (_orientQuad == null)
+        {
+            return;
+        }
+
         var uv = _frameOrientation.SourceUVsForOrientedCorners(); // (float u, float v)[]
         var uvList = new List<Vector2>(4);
         foreach (var corner in uv) uvList.Add(new Vector2(corner.u, corner.v));
         _orientQuad.SetUVs(0, uvList);
         _orientQuad.UploadMeshData(false);
-
-        var previous = RenderTexture.active;
-        RenderTexture.active = _orientedFrame;
-        _orientBlitMaterial.mainTexture = webcamTexture;
-        _orientBlitMaterial.SetPass(0);
-        GL.PushMatrix();
-        GL.LoadOrtho();
-        Graphics.DrawMeshNow(_orientQuad, Vector3.zero, Quaternion.identity);
-        GL.PopMatrix();
-        RenderTexture.active = previous;
     }
 
+    // Vertices are the unit square in BL, BR, TR, TL order; triangles are wound clockwise so the
+    // quad is front-facing under GL.LoadOrtho() and survives a Cull Back blit shader.
     private static Mesh BuildUnitQuad()
     {
         return new Mesh
@@ -568,7 +612,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 new Vector3(1, 1, 0), new Vector3(0, 1, 0),
             },
             uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) },
-            triangles = new[] { 0, 1, 2, 0, 2, 3 },
+            triangles = new[] { 0, 2, 1, 0, 3, 2 },
         };
     }
 
@@ -879,14 +923,20 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             {
                 var active = ActiveCameraFrame();
                 var readable = RenderTexture.GetTemporary(active.width, active.height, 0, RenderTextureFormat.ARGB32);
-                Graphics.Blit(active, readable);
                 var previousActive = RenderTexture.active;
-                RenderTexture.active = readable;
-                tempSnapshot = new Texture2D(readable.width, readable.height, TextureFormat.RGB24, false);
-                tempSnapshot.ReadPixels(new UnityEngine.Rect(0, 0, readable.width, readable.height), 0, 0);
-                tempSnapshot.Apply();
-                RenderTexture.active = previousActive;
-                RenderTexture.ReleaseTemporary(readable);
+                try
+                {
+                    Graphics.Blit(active, readable);
+                    RenderTexture.active = readable;
+                    tempSnapshot = new Texture2D(readable.width, readable.height, TextureFormat.RGB24, false);
+                    tempSnapshot.ReadPixels(new UnityEngine.Rect(0, 0, readable.width, readable.height), 0, 0);
+                    tempSnapshot.Apply();
+                }
+                finally
+                {
+                    RenderTexture.active = previousActive;
+                    RenderTexture.ReleaseTemporary(readable);
+                }
                 Debug.Log("Snapshot taken.");
             }
             catch (Exception e)
