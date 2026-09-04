@@ -92,8 +92,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     public RectTransform placementEyeImage;
     public RectTransform placementMouthImage;
 
-    [Tooltip("登録の撮影進捗（n / 3 枚目、撮影完了）専用の表示。RegisterCameraPanel の中に置く。" +
-             "エラーや認識状態のメッセージは resultText に出るので、ここには流れない。")]
+    [Tooltip("登録モードの読み上げ枠。RegisterCameraPanel の中に置く。撮影進捗（n / 3 枚目、撮影完了）に加え、" +
+             "登録中に出るエラーもここに表示する。Talk モードのメッセージは resultText 側に出る。")]
     public TMP_Text registrationStatusText;
 
     [Tooltip("撮影進捗のドット3個。左から撮影済みを点灯する。")]
@@ -1384,15 +1384,27 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     #region UI helpers
     /// <summary>
-    /// Status, error, and recognition messages. They must stay on <see cref="resultText"/>: it is the
-    /// readout that is visible in Talk mode, where <see cref="registrationStatusText"/> lives under
-    /// the inactive RegisterCameraPanel and would swallow the message.
+    /// Status, error, and recognition messages. The two readouts sit on different panels —
+    /// <see cref="registrationStatusText"/> under RegisterCameraPanel, <see cref="resultText"/> under
+    /// TalkCameraPanel — and each panel hides the other's text, so a single fixed target is invisible
+    /// in one of the two modes. The target is therefore chosen by which camera panel is actually
+    /// active. Routing by activation rather than by <see cref="DesiredMode"/> also gets the
+    /// EnablePanelRoutine permission/camera failures right: they run before the mode switch has
+    /// activated either panel, so "whatever is on screen right now" is the only correct answer there.
     /// </summary>
     private void SetStatusText(string message)
     {
-        if (resultText != null)
+        var registering = registerCameraPanel != null && registerCameraPanel.activeInHierarchy;
+        var target = registering ? registrationStatusText : resultText;
+        if (target == null)
         {
-            resultText.text = message;
+            // The preferred readout is unwired; the other one is still better than nothing.
+            target = registering ? resultText : registrationStatusText;
+        }
+
+        if (target != null)
+        {
+            target.text = message;
         }
         else
         {
