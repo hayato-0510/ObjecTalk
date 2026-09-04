@@ -206,6 +206,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             if (_remoteAudioSource != null)
             {
                 track.AttachTo(_remoteAudioSource);
+                _remoteAudioSource.loop = true;
                 _remoteAudioSource.Play();
             }
         }
@@ -240,42 +241,41 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             }
         }
 
-        private async Task DisposeResourcesAsync(ConnectionResources resources)
+        private Task DisposeResourcesAsync(ConnectionResources resources)
         {
             if (resources == null || Interlocked.Exchange(ref resources.DisposeStarted, 1) != 0)
             {
-                return;
+                return Task.CompletedTask;
             }
 
             try
             {
-                if (_remoteAudioSource != null)
-                {
-                    _remoteAudioSource.Stop();
-                }
+                // Every operation is isolated so a faulty native/plugin wrapper cannot prevent
+                // the microphone track and remaining WebRTC resources from being released.
+                TryCleanup(() => _remoteAudioSource?.Stop());
 
                 if (resources.DataChannel != null)
                 {
                     if (resources.DataChannelMessageHandler != null)
                     {
-                        resources.DataChannel.MessageReceived -= resources.DataChannelMessageHandler;
+                        TryCleanup(() => resources.DataChannel.MessageReceived -= resources.DataChannelMessageHandler);
                     }
-                    resources.DataChannel.Close();
-                    resources.DataChannel.Dispose();
+                    TryCleanup(resources.DataChannel.Close);
+                    TryCleanup(resources.DataChannel.Dispose);
                 }
 
-                resources.RemoteTrack?.Detach();
-                resources.RemoteTrack?.Dispose();
-                resources.LocalTrack?.Dispose();
+                TryCleanup(() => resources.RemoteTrack?.Detach());
+                TryCleanup(() => resources.RemoteTrack?.Dispose());
+                TryCleanup(() => resources.LocalTrack?.Dispose());
 
                 if (resources.Peer != null)
                 {
                     if (resources.RemoteTrackHandler != null)
                     {
-                        resources.Peer.RemoteAudioTrackReceived -= resources.RemoteTrackHandler;
+                        TryCleanup(() => resources.Peer.RemoteAudioTrackReceived -= resources.RemoteTrackHandler);
                     }
-                    resources.Peer.Close();
-                    resources.Peer.Dispose();
+                    TryCleanup(resources.Peer.Close);
+                    TryCleanup(resources.Peer.Dispose);
                 }
             }
             finally
@@ -290,7 +290,20 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                         _current = null;
                     }
                 }
+            }
 
+            return Task.CompletedTask;
+        }
+
+        private static void TryCleanup(Action cleanup)
+        {
+            try
+            {
+                cleanup?.Invoke();
+            }
+            catch
+            {
+                // Cleanup is best-effort per resource; continue to release all remaining owners.
             }
         }
 
@@ -463,7 +476,9 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             {
                 if (_remoteAudioSource != null)
                 {
-                    _remoteAudioSource.SetTrack(null);
+                    // Unity WebRTC 3 3.0.0 SetTrack dereferences its argument and cannot accept
+                    // null. Stopping the AudioSource and disposing the track releases its renderer.
+                    _remoteAudioSource.Stop();
                     _remoteAudioSource = null;
                 }
             }

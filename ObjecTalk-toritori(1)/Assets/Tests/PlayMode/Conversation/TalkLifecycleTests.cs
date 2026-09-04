@@ -74,6 +74,28 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
         }
 
         [UnityTest]
+        public IEnumerator DisconnectAsync_ContinuesCleanupWhenIndividualResourcesThrow()
+        {
+            var adapter = new FakePeerConnectionAdapter
+            {
+                RaiseRemoteTrackOnSetRemote = true,
+                ThrowOnChannelClose = true,
+                ThrowOnRemoteDetach = true,
+                ThrowOnPeerClose = true
+            };
+            var transport = new RealtimeWebRtcTransport(adapter, new FakeSdpExchange(), null, null);
+            yield return transport.ConnectAsync(Context, CancellationToken.None).AsCoroutine();
+
+            yield return transport.DisconnectAsync(CancellationToken.None).AsCoroutine();
+
+            Assert.That(adapter.Channel.DisposeCalls, Is.EqualTo(1));
+            Assert.That(adapter.RemoteTrack.DisposeCalls, Is.EqualTo(1));
+            Assert.That(adapter.LocalTrack.DisposeCalls, Is.EqualTo(1));
+            Assert.That(adapter.Peer.DisposeCalls, Is.EqualTo(1));
+            Assert.That(transport.IsConnected, Is.False);
+        }
+
+        [UnityTest]
         public IEnumerator ConnectAsync_CancellationDuringSdpExchange_DisposesPartialConnection()
         {
             var adapter = new FakePeerConnectionAdapter();
@@ -157,10 +179,14 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
             public readonly FakePeerConnection Peer;
             public bool RaiseRemoteTrackOnSetRemote;
             public bool ThrowOnSetRemote;
+            public bool ThrowOnChannelClose;
+            public bool ThrowOnRemoteDetach;
+            public bool ThrowOnPeerClose;
 
             public FakePeerConnectionAdapter()
             {
                 Current = this;
+                RemoteTrack.ThrowOnDetach = () => ThrowOnRemoteDetach;
                 Peer = new FakePeerConnection(this);
             }
 
@@ -225,15 +251,23 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
                     return Task.CompletedTask;
                 }
 
-                public void Close() => CloseCalls++;
+                public void Close()
+                {
+                    CloseCalls++;
+                    if (_owner.ThrowOnPeerClose) throw new InvalidOperationException("peer close failure");
+                }
                 public void Dispose() => DisposeCalls++;
             }
 
             private sealed class FakeAudioTrack : IRealtimeAudioTrack
             {
+                public Func<bool> ThrowOnDetach;
                 public int DisposeCalls { get; private set; }
                 public void AttachTo(UnityEngine.AudioSource audioSource) { }
-                public void Detach() { }
+                public void Detach()
+                {
+                    if (ThrowOnDetach?.Invoke() == true) throw new InvalidOperationException("detach failure");
+                }
                 public void Dispose() => DisposeCalls++;
             }
 
@@ -245,7 +279,11 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
                 public int DisposeCalls { get; private set; }
                 public void Send(string message) => SentMessages.Add(message);
                 public void RaiseMessage(string message) => MessageReceived?.Invoke(message);
-                public void Close() => CloseCalls++;
+                public void Close()
+                {
+                    CloseCalls++;
+                    if (FakePeerConnectionAdapter.Current.ThrowOnChannelClose) throw new InvalidOperationException("channel close failure");
+                }
                 public void Dispose() => DisposeCalls++;
             }
         }
