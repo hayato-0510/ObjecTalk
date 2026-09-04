@@ -92,7 +92,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     public RectTransform placementEyeImage;
     public RectTransform placementMouthImage;
 
-    [Tooltip("撮影枚数と再撮影の案内を表示するテキスト。未設定なら resultText を使う。")]
+    [Tooltip("登録の撮影進捗（n / 3 枚目、撮影完了）専用の表示。RegisterCameraPanel の中に置く。" +
+             "エラーや認識状態のメッセージは resultText に出るので、ここには流れない。")]
     public TMP_Text registrationStatusText;
 
     [Tooltip("撮影進捗のドット3個。左から撮影済みを点灯する。")]
@@ -166,8 +167,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private int _orientedSourceHeight;
     private bool _warnedNoBlitMaterial;
     // Set when the render texture cannot be created for the current camera size/orientation, so the
-    // rebuild is not re-attempted (and re-logged) every frame; cleared when the source changes.
+    // rebuild is not re-attempted (and re-logged) every frame; cleared when the source changes and
+    // whenever the panel or the application comes back to the foreground, so a transient failure
+    // does not degrade the rest of the process's life.
     private bool _orientedFrameUnavailable;
+
+    // One-shot so an unwired registration readout does not log on every capture.
+    private bool _warnedNoStatusText;
+
+    // Pending one-frame guide re-size; see RefreshGuideFrameSizeDeferred.
+    private Coroutine _guideResizeRoutine;
 
     /// <summary>Leaves the camera flow: stops the camera and loads the home scene.</summary>
     public void ReturnToHome()
@@ -241,7 +250,14 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             return;
         }
 
-        _preprocessor = new CameraFramePreprocessor();
+        // guideFractionOfPreview is the single source of truth for the centre crop: the same value
+        // drives the on-preview guide frame and the box the embedding actually keeps, so nudging the
+        // Inspector field cannot silently desync them. The [Range] attribute keeps it inside the
+        // (0, 1] the preprocessor requires.
+        _preprocessor = new CameraFramePreprocessor(
+            ImageGeometry.EmbeddingImageSize,
+            ImageGeometry.MaximumVerificationImageSize,
+            guideFractionOfPreview);
         _verifier = BuildLocalFeatureVerifier();
         _extractor = new SentisEmbeddingExtractor();
 
@@ -319,6 +335,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     /// </summary>
     private IEnumerator EnablePanelRoutine()
     {
+        // A failed RenderTexture.Create() is usually transient (a memory spike, a lost device), so
+        // give the oriented frame a fresh attempt every time the panel comes back rather than
+        // leaving the session on the raw camera texture for good.
+        _orientedFrameUnavailable = false;
+
         yield return RequestCameraAuthorization();
 
         if (!_cameraAuthorized)
@@ -441,6 +462,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     private IEnumerator ResumeAfterApplicationPause()
     {
+        // Same as EnablePanelRoutine: retry the oriented frame now the app is in the foreground.
+        _orientedFrameUnavailable = false;
+
         yield return RequestCameraAuthorization();
 
         if (!_cameraAuthorized)
@@ -538,6 +562,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         if (_orientBlitMaterial == null)
         {
+            // Unlit/Texture is in Always Included Shaders (ProjectSettings/GraphicsSettings.asset),
+            // which is what makes Shader.Find resolve it in a player build; the rest of the chain is
+            // defence in depth. Shader.Find returns a genuine null on miss, so ?? is safe here.
             var shader = Shader.Find("Unlit/Texture")
                 ?? Shader.Find("Hidden/BlitCopy")
                 ?? Shader.Find("Sprites/Default");
@@ -644,6 +671,13 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         if (fitter != null && _orientedFrame != null && _orientedFrame.height > 0)
         {
             fitter.aspectRatio = _orientedFrame.width / (float)_orientedFrame.height;
+
+            // The fitter has just resized the preview, so the guide square taken against the
+            // pre-layout rect at panel activation is now stale.
+            if (captureGuideFrame != null && captureGuideFrame.gameObject.activeSelf)
+            {
+                RefreshGuideFrameSize();
+            }
         }
     }
 
@@ -1349,12 +1383,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     #endregion
 
     #region UI helpers
+    /// <summary>
+    /// Status, error, and recognition messages. They must stay on <see cref="resultText"/>: it is the
+    /// readout that is visible in Talk mode, where <see cref="registrationStatusText"/> lives under
+    /// the inactive RegisterCameraPanel and would swallow the message.
+    /// </summary>
     private void SetStatusText(string message)
     {
-        var target = registrationStatusText != null ? registrationStatusText : resultText;
-        if (target != null)
+        if (resultText != null)
         {
-            target.text = message;
+            resultText.text = message;
         }
         else
         {
@@ -1362,35 +1400,28 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         }
     }
 
-    // How many of the required views have been captured in the session in progress.
-    private int _capturedViewCount;
-
     /// <summary>
     /// Updates the "n / 3 枚目" readout, the angle hint, and the progress dots for the number of
-    /// views captured so far. Every reference is optional; a missing one is skipped, not fatal.
+    /// views captured so far. The decision is <see cref="RegistrationProgressView"/>'s; this method
+    /// only applies it. Every reference is optional; a missing one is skipped, not fatal.
     /// </summary>
     private void SetRegistrationProgress(int capturedViews)
     {
-        _capturedViewCount = capturedViews;
-        var total = RecognitionSettings.RequiredSamplesPerObject;
-        var nextView = Mathf.Min(capturedViews + 1, total);
+        var view = RegistrationProgressView.For(capturedViews, RecognitionSettings.RequiredSamplesPerObject);
 
         if (registrationStatusText != null)
         {
-            registrationStatusText.text = capturedViews >= total
-                ? RecognitionMessages.RegistrationComplete
-                : RecognitionMessages.RegistrationViewPrompt(nextView, total);
+            registrationStatusText.text = view.Status;
         }
-        else
+        else if (!_warnedNoStatusText)
         {
             Debug.LogWarning("registrationStatusText is not set; registration progress is not shown.");
+            _warnedNoStatusText = true;
         }
 
         if (registrationInstructionText != null)
         {
-            registrationInstructionText.text = capturedViews >= 1
-                ? RecognitionMessages.RegistrationAngleHint
-                : string.Empty;
+            registrationInstructionText.text = view.Instruction;
         }
 
         if (registrationDots != null)
@@ -1399,15 +1430,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             {
                 if (registrationDots[i] != null)
                 {
-                    registrationDots[i].enabled = i < capturedViews;
+                    registrationDots[i].enabled = i < view.LitDots;
                 }
             }
         }
     }
 
     /// <summary>
-    /// Shows or hides the on-preview crop-guide frame. When shown, it is resized to the square the
-    /// embedding actually keeps (<see cref="guideFractionOfPreview"/> of the preview's short side).
+    /// Shows or hides the on-preview crop-guide frame. When shown it is sized immediately and again
+    /// on the next frame: the panel is normally activated on the same frame this runs, so the
+    /// preview RectTransform still holds its pre-layout size here.
     /// </summary>
     private void SetGuideFrameActive(bool active)
     {
@@ -1420,11 +1452,51 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             return;
         }
 
+        if (_guideResizeRoutine != null)
+        {
+            StopCoroutine(_guideResizeRoutine);
+            _guideResizeRoutine = null;
+        }
+
         captureGuideFrame.gameObject.SetActive(active);
         if (!active)
         {
             return;
         }
+
+        RefreshGuideFrameSize();
+        if (isActiveAndEnabled)
+        {
+            _guideResizeRoutine = StartCoroutine(RefreshGuideFrameSizeDeferred());
+        }
+    }
+
+    /// <summary>
+    /// Re-sizes the guide one frame later, once the panel activation has produced a layout pass.
+    /// <see cref="RefreshGuideFrameSize"/> is also called from <see cref="ApplyCameraDisplay"/>,
+    /// which covers the later frame where the AspectRatioFitter finally learns the aspect ratio.
+    /// </summary>
+    private IEnumerator RefreshGuideFrameSizeDeferred()
+    {
+        yield return null;
+        RefreshGuideFrameSize();
+        _guideResizeRoutine = null;
+    }
+
+    /// <summary>
+    /// Sizes the guide to the square the embedding actually keeps
+    /// (<see cref="guideFractionOfPreview"/> of the preview's short side). The canvas is flushed
+    /// first so the preview's rect reflects any pending layout or AspectRatioFitter rebuild; this
+    /// runs only on panel activation and camera-frame rebuilds, never per frame.
+    /// </summary>
+    private void RefreshGuideFrameSize()
+    {
+        if (captureGuideFrame == null || !captureGuideFrame.gameObject.activeSelf)
+        {
+            return;
+        }
+
+        Canvas.ForceUpdateCanvases();
 
         var parent = captureGuideFrame.parent as RectTransform;
         var previewSize = parent != null ? parent.rect.size : captureGuideFrame.rect.size;
