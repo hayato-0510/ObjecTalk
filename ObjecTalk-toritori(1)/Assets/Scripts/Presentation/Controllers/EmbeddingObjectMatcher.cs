@@ -141,6 +141,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private string _registrationObjectId;
     private bool _cameraAuthorized;
 
+    // --- Upright camera frame ---
+    // Recognition, registration capture, the placement snapshot, and both preview RawImages all
+    // read _orientedFrame so the AI and the user see the same upright, un-mirrored image. It is
+    // rebuilt whenever the camera size or reported orientation changes.
+    private RenderTexture _orientedFrame;
+    private Material _orientBlitMaterial;
+    private Mesh _orientQuad;
+    private FrameOrientation _frameOrientation;
+    private int _orientedSourceWidth;
+    private int _orientedSourceHeight;
+    private bool _warnedNoBlitMaterial;
+
     /// <summary>Leaves the camera flow: stops the camera and loads the home scene.</summary>
     public void ReturnToHome()
     {
@@ -316,24 +328,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         LoadRegisteredObjects();
         // --- End Load ---
 
-        // 1. Assign WebCamTexture to both RawImages and reset color
-        if (registerCameraDisplay != null)
-        {
-            registerCameraDisplay.texture = webcamTexture;
-            registerCameraDisplay.color = Color.white;
-        }
-        if (talkCameraDisplay != null)
-        {
-            talkCameraDisplay.texture = webcamTexture;
-            talkCameraDisplay.color = Color.white;
-        }
-
-        // 2. Start the camera if it's not already playing
+        // 1. Start the camera if it's not already playing
         if (!webcamTexture.isPlaying)
         {
             Debug.Log("OnEnable: Starting Webcam...");
             webcamTexture.Play();
         }
+
+        // 2. Point both previews at the active camera frame. Until the camera delivers a real
+        //    frame and EnsureOrientedFrame() builds _orientedFrame, ActiveCameraFrame() returns
+        //    the raw texture; Update() re-applies the oriented frame once it exists.
+        ApplyCameraDisplay(registerCameraDisplay);
+        ApplyCameraDisplay(talkCameraDisplay);
 
         _recognitionService?.Resume();
 
@@ -434,8 +440,176 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         _recognitionService?.Resume();
     }
 
+    #region Upright camera frame
+
+    /// <summary>
+    /// The frame recognition, registration, and the preview all read: <see cref="_orientedFrame"/>
+    /// once it is built for the current camera size/orientation; the raw texture until then (or on
+    /// fallback).
+    /// </summary>
+    private Texture ActiveCameraFrame()
+    {
+        return _orientedFrame != null ? (Texture)_orientedFrame : webcamTexture;
+    }
+
+    /// <summary>
+    /// Builds (or rebuilds) <see cref="_orientedFrame"/> for the camera's current size and reported
+    /// orientation. A no-op until the camera delivers a real frame; on a failure to create the
+    /// render texture it warns and leaves the previews on the raw texture.
+    /// </summary>
+    private void EnsureOrientedFrame()
+    {
+        if (webcamTexture == null || webcamTexture.width <= 16 || webcamTexture.height <= 16)
+        {
+            return; // camera has not delivered a real frame yet
+        }
+
+        var orientation = FrameOrientation.FromWebCam(
+            (int)webcamTexture.videoRotationAngle, webcamTexture.videoVerticallyMirrored);
+
+        if (_orientedFrame != null
+            && _orientedSourceWidth == webcamTexture.width
+            && _orientedSourceHeight == webcamTexture.height
+            && _frameOrientation.Equals(orientation))
+        {
+            return;
+        }
+
+        ReleaseOrientedFrame();
+        _frameOrientation = orientation;
+        _orientedSourceWidth = webcamTexture.width;
+        _orientedSourceHeight = webcamTexture.height;
+        var (w, h) = orientation.OrientedSize(webcamTexture.width, webcamTexture.height);
+        _orientedFrame = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32)
+        {
+            name = "ObjecTalk Oriented Camera Frame",
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Bilinear,
+        };
+        _orientedFrame.Create();
+
+        if (!_orientedFrame.IsCreated())
+        {
+            Debug.LogWarning("EmbeddingObjectMatcher: could not create the oriented camera frame; "
+                + "recognition and preview fall back to the raw camera texture.");
+            ReleaseOrientedFrame();
+            ApplyCameraDisplay(registerCameraDisplay);
+            ApplyCameraDisplay(talkCameraDisplay);
+            return;
+        }
+
+        if (_orientBlitMaterial == null)
+        {
+            var shader = Shader.Find("Unlit/Texture")
+                ?? Shader.Find("Hidden/BlitCopy")
+                ?? Shader.Find("Sprites/Default");
+            if (shader != null)
+            {
+                _orientBlitMaterial = new Material(shader);
+            }
+        }
+        if (_orientQuad == null)
+        {
+            _orientQuad = BuildUnitQuad();
+        }
+
+        ApplyCameraDisplay(registerCameraDisplay);
+        ApplyCameraDisplay(talkCameraDisplay);
+    }
+
+    /// <summary>
+    /// Draws the raw <see cref="webcamTexture"/> into <see cref="_orientedFrame"/> the right way up.
+    /// Uses a plain identity blit when the source is already upright, or when no blit material could
+    /// be created (a warning is logged once) so recognition never NullRefs.
+    /// </summary>
+    private void RenderOrientedFrame()
+    {
+        if (_orientedFrame == null || webcamTexture == null)
+        {
+            return;
+        }
+
+        if (_frameOrientation.IsIdentity || _orientBlitMaterial == null || _orientQuad == null)
+        {
+            if (!_frameOrientation.IsIdentity && _orientBlitMaterial == null && !_warnedNoBlitMaterial)
+            {
+                Debug.LogWarning("EmbeddingObjectMatcher: no blit material for the oriented camera "
+                    + "frame; preview and recognition use the raw camera orientation.");
+                _warnedNoBlitMaterial = true;
+            }
+            Graphics.Blit(webcamTexture, _orientedFrame);
+            return;
+        }
+
+        var uv = _frameOrientation.SourceUVsForOrientedCorners(); // (float u, float v)[]
+        var uvList = new List<Vector2>(4);
+        foreach (var corner in uv) uvList.Add(new Vector2(corner.u, corner.v));
+        _orientQuad.SetUVs(0, uvList);
+        _orientQuad.UploadMeshData(false);
+
+        var previous = RenderTexture.active;
+        RenderTexture.active = _orientedFrame;
+        _orientBlitMaterial.mainTexture = webcamTexture;
+        _orientBlitMaterial.SetPass(0);
+        GL.PushMatrix();
+        GL.LoadOrtho();
+        Graphics.DrawMeshNow(_orientQuad, Vector3.zero, Quaternion.identity);
+        GL.PopMatrix();
+        RenderTexture.active = previous;
+    }
+
+    private static Mesh BuildUnitQuad()
+    {
+        return new Mesh
+        {
+            vertices = new[]
+            {
+                new Vector3(0, 0, 0), new Vector3(1, 0, 0),
+                new Vector3(1, 1, 0), new Vector3(0, 1, 0),
+            },
+            uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) },
+            triangles = new[] { 0, 1, 2, 0, 2, 3 },
+        };
+    }
+
+    private void ApplyCameraDisplay(RawImage display)
+    {
+        if (display == null)
+        {
+            return;
+        }
+
+        display.texture = ActiveCameraFrame();
+        display.color = Color.white;
+
+        var fitter = display.GetComponent<AspectRatioFitter>();
+        if (fitter != null && _orientedFrame != null && _orientedFrame.height > 0)
+        {
+            fitter.aspectRatio = _orientedFrame.width / (float)_orientedFrame.height;
+        }
+    }
+
+    private void ReleaseOrientedFrame()
+    {
+        if (_orientedFrame != null)
+        {
+            _orientedFrame.Release();
+            Destroy(_orientedFrame);
+            _orientedFrame = null;
+        }
+    }
+
+    #endregion
+
     void Update()
     {
+        // Keep the upright frame current for the preview even when recognition is unavailable.
+        if (webcamTexture != null && webcamTexture.didUpdateThisFrame)
+        {
+            EnsureOrientedFrame();
+            RenderOrientedFrame();
+        }
+
         if (!_recognitionAvailable)
         {
             return;
@@ -447,7 +621,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             && webcamTexture != null
             && webcamTexture.didUpdateThisFrame)
         {
-            _recognitionService.StartRecognition(webcamTexture, Time.timeAsDouble);
+            _recognitionService.StartRecognition(ActiveCameraFrame(), Time.timeAsDouble);
         }
 
         // One bounded slice of work per frame, whichever kind of run is in flight.
@@ -498,6 +672,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         if (webcamTexture != null)
         {
             if (webcamTexture.isPlaying) webcamTexture.Stop();
+        }
+
+        ReleaseOrientedFrame();
+        if (_orientBlitMaterial != null)
+        {
+            Destroy(_orientBlitMaterial);
+            _orientBlitMaterial = null;
+        }
+        if (_orientQuad != null)
+        {
+            Destroy(_orientQuad);
+            _orientQuad = null;
         }
 
         dbManager?.Dispose();
@@ -685,14 +871,22 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             BeginRegistrationSession();
         }
 
-        // The first view is the one the user places the face on, so keep its snapshot.
+        // The first view is the one the user places the face on, so keep its snapshot. It must
+        // match the upright frame the recognition sees, so read it from ActiveCameraFrame().
         if (tempSnapshot == null)
         {
             try
             {
-                tempSnapshot = new Texture2D(webcamTexture.width, webcamTexture.height, TextureFormat.RGB24, false);
-                tempSnapshot.SetPixels(webcamTexture.GetPixels());
+                var active = ActiveCameraFrame();
+                var readable = RenderTexture.GetTemporary(active.width, active.height, 0, RenderTextureFormat.ARGB32);
+                Graphics.Blit(active, readable);
+                var previousActive = RenderTexture.active;
+                RenderTexture.active = readable;
+                tempSnapshot = new Texture2D(readable.width, readable.height, TextureFormat.RGB24, false);
+                tempSnapshot.ReadPixels(new UnityEngine.Rect(0, 0, readable.width, readable.height), 0, 0);
                 tempSnapshot.Apply();
+                RenderTexture.active = previousActive;
+                RenderTexture.ReleaseTemporary(readable);
                 Debug.Log("Snapshot taken.");
             }
             catch (Exception e)
@@ -703,7 +897,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             }
         }
 
-        var status = _recognitionService.CaptureRegistrationView(webcamTexture);
+        var status = _recognitionService.CaptureRegistrationView(ActiveCameraFrame());
         switch (status)
         {
             case RegistrationCaptureStatus.Started:
