@@ -57,7 +57,7 @@ namespace ObjecTalk.Core.Conversation
                 case ConversationState.Speaking:
                     return next == ConversationState.Listening || next == ConversationState.Reconnecting || next == ConversationState.Stopping;
                 case ConversationState.Reconnecting:
-                    return next == ConversationState.Stopping;
+                    return next == ConversationState.Connecting || next == ConversationState.Stopping;
                 case ConversationState.Stopping:
                     return next == ConversationState.Idle;
                 default:

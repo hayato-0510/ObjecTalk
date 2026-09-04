@@ -67,7 +67,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         }
     }
 
-    public sealed class RealtimeWebRtcTransport
+    public sealed class RealtimeWebRtcTransport : IRealtimeConversationTransport
     {
         public const string EventsChannelLabel = "oai-events";
         public const string ResponseCancelEventJson = "{\"type\":\"response.cancel\"}";
@@ -172,6 +172,11 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             }
 
             return Task.CompletedTask;
+        }
+
+        public void StopRemotePlayback()
+        {
+            _remoteAudioSource?.Stop();
         }
 
         public async Task DisconnectAsync(CancellationToken cancellationToken)
