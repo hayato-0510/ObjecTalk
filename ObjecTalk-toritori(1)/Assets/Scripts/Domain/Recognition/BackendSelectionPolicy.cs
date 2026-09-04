@@ -62,6 +62,25 @@ namespace ObjecTalk.Domain.Recognition
                 ? RegistrationComplete
                 : $"{capturedViews}/{requiredViews} 枚撮影しました。角度を変えて撮影してください。";
         }
+
+        /// <summary>Which view the user is about to take, with framing guidance, e.g. "1 / 3 枚目 — ...".</summary>
+        public static string RegistrationViewPrompt(int nextView, int totalViews)
+        {
+            if (nextView < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(nextView), "The next view is 1-based.");
+            }
+
+            if (totalViews < nextView)
+            {
+                throw new ArgumentOutOfRangeException(nameof(totalViews), "The total cannot be below the next view.");
+            }
+
+            return $"{nextView} / {totalViews} 枚目 — 物体を枠の中央に収めて撮影";
+        }
+
+        /// <summary>Added to the instruction from the second view onward.</summary>
+        public const string RegistrationAngleHint = "角度を少し変えてください";
     }
 
     /// <summary>

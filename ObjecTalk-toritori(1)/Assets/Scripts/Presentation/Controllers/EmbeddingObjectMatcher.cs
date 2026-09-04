@@ -95,6 +95,19 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     [Tooltip("撮影枚数と再撮影の案内を表示するテキスト。未設定なら resultText を使う。")]
     public TMP_Text registrationStatusText;
 
+    [Tooltip("撮影進捗のドット3個。左から撮影済みを点灯する。")]
+    public Image[] registrationDots;
+
+    [Tooltip("プレビュー上のキャプチャ範囲ガイド枠。実際に embedding に渡る中央ボックスと一致させる。")]
+    public RectTransform captureGuideFrame;
+
+    [Tooltip("撮影の狙いを説明するテキスト。")]
+    public TMP_Text registrationInstructionText;
+
+    [Range(0.3f, 1f)]
+    [Tooltip("プレビュー上のガイド枠の大きさ（短辺に対する割合）。ImageGeometry.DefaultCropFraction に合わせる。")]
+    public float guideFractionOfPreview = ImageGeometry.DefaultCropFraction;
+
     [Header("Recognition Mode UI (TalkCameraPanel)")]
     public Image recognitionEyeImage;
     public Image recognitionMouthImage;
@@ -403,6 +416,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // Pause abandons the run in flight and hands the GPU buffers back.
         _recognitionService?.Pause();
         UpdateRecognitionState(false, "");
+        SetGuideFrameActive(false);
     }
 
     /// <summary>Releases camera and inference work while the application is backgrounded.</summary>
@@ -689,9 +703,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 break;
 
             case RecognitionTickStatus.CaptureAccepted:
-                SetStatusText(RecognitionMessages.RegistrationProgress(
-                    result.CapturedViewCount,
-                    RecognitionSettings.RequiredSamplesPerObject));
+                SetRegistrationProgress(result.CapturedViewCount);
                 if (result.CapturedViewCount >= RecognitionSettings.RequiredSamplesPerObject)
                 {
                     EnterPlacementFromCaptures();
@@ -885,7 +897,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         _registrationObjectId = Guid.NewGuid().ToString();
         _recognitionService.BeginRegistration(_registrationObjectId);
         DestroySnapshot();
-        SetStatusText(RecognitionMessages.RegistrationProgress(0, RecognitionSettings.RequiredSamplesPerObject));
+        SetRegistrationProgress(0);
+        SetGuideFrameActive(true);
         SetRegisterButtonInteractable(true);
     }
 
@@ -972,6 +985,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private void EnterPlacementFromCaptures()
     {
         SetRegisterButtonInteractable(true);
+        SetGuideFrameActive(false);
         if (tempSnapshot == null)
         {
             Debug.LogError("Three views were captured but no snapshot was kept.");
@@ -1039,6 +1053,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.Log("Back button pressed on Recognition panel. Returning to selection panel.");
 
             CancelRegistrationSession();
+            SetGuideFrameActive(false);
 
             // 1. モード選択パネルを表示する
             if (talkSelectionPanel != null)
@@ -1129,9 +1144,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             || _recognitionService.CapturedViewCount != RecognitionSettings.RequiredSamplesPerObject)
         {
             Debug.LogWarning("Registration needs three valid captures before it can be saved.");
-            SetStatusText(RecognitionMessages.RegistrationProgress(
-                _recognitionService?.CapturedViewCount ?? 0,
-                RecognitionSettings.RequiredSamplesPerObject));
+            SetRegistrationProgress(_recognitionService?.CapturedViewCount ?? 0);
             if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
@@ -1346,6 +1359,80 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         else
         {
             Debug.Log(message);
+        }
+    }
+
+    // How many of the required views have been captured in the session in progress.
+    private int _capturedViewCount;
+
+    /// <summary>
+    /// Updates the "n / 3 枚目" readout, the angle hint, and the progress dots for the number of
+    /// views captured so far. Every reference is optional; a missing one is skipped, not fatal.
+    /// </summary>
+    private void SetRegistrationProgress(int capturedViews)
+    {
+        _capturedViewCount = capturedViews;
+        var total = RecognitionSettings.RequiredSamplesPerObject;
+        var nextView = Mathf.Min(capturedViews + 1, total);
+
+        if (registrationStatusText != null)
+        {
+            registrationStatusText.text = capturedViews >= total
+                ? RecognitionMessages.RegistrationComplete
+                : RecognitionMessages.RegistrationViewPrompt(nextView, total);
+        }
+        else
+        {
+            Debug.LogWarning("registrationStatusText is not set; registration progress is not shown.");
+        }
+
+        if (registrationInstructionText != null)
+        {
+            registrationInstructionText.text = capturedViews >= 1
+                ? RecognitionMessages.RegistrationAngleHint
+                : string.Empty;
+        }
+
+        if (registrationDots != null)
+        {
+            for (var i = 0; i < registrationDots.Length; i++)
+            {
+                if (registrationDots[i] != null)
+                {
+                    registrationDots[i].enabled = i < capturedViews;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Shows or hides the on-preview crop-guide frame. When shown, it is resized to the square the
+    /// embedding actually keeps (<see cref="guideFractionOfPreview"/> of the preview's short side).
+    /// </summary>
+    private void SetGuideFrameActive(bool active)
+    {
+        if (captureGuideFrame == null)
+        {
+            if (active)
+            {
+                Debug.LogWarning("captureGuideFrame is not set; the crop guide will not be shown.");
+            }
+            return;
+        }
+
+        captureGuideFrame.gameObject.SetActive(active);
+        if (!active)
+        {
+            return;
+        }
+
+        var parent = captureGuideFrame.parent as RectTransform;
+        var previewSize = parent != null ? parent.rect.size : captureGuideFrame.rect.size;
+        if (previewSize.x > 0f && previewSize.y > 0f)
+        {
+            var side = RegistrationGuideLayout.FrameSize(previewSize.x, previewSize.y, guideFractionOfPreview);
+            captureGuideFrame.sizeDelta = new Vector2(side, side);
+            captureGuideFrame.anchoredPosition = Vector2.zero;
         }
     }
 
