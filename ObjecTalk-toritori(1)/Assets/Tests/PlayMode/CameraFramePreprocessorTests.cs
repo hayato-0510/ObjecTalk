@@ -1,8 +1,10 @@
 using System;
+using System.Collections;
 using NUnit.Framework;
 using ObjecTalk.Domain.Recognition;
 using ObjecTalk.Infrastructure.Vision;
 using UnityEngine;
+using UnityEngine.TestTools;
 using UnityEngine.TestTools.Constraints;
 
 // Brings in AllocatingGCMemory() while keeping every other constraint on NUnit's Is.
@@ -128,8 +130,26 @@ namespace ObjecTalk.Tests.PlayMode
 
             var frame = _preprocessor.CopyVerificationFrame(_source);
 
-            Assert.That(frame.width, Is.EqualTo(180));
-            Assert.That(frame.height, Is.EqualTo(180));
+            // The 75% center crop of the 180px short side rounds to 135.
+            Assert.That(frame.width, Is.EqualTo(135));
+            Assert.That(frame.height, Is.EqualTo(135));
+        }
+
+        [UnityTest]
+        public IEnumerator PrepareEmbedding_CropsSeventyFivePercentOfTheShortSide()
+        {
+            var source = new RenderTexture(1280, 720, 0);
+            source.Create();
+            var preprocessor = new CameraFramePreprocessor();
+
+            var embedding = preprocessor.PrepareEmbedding(source);
+
+            Assert.That(embedding.width, Is.EqualTo(ImageGeometry.EmbeddingImageSize));
+            Assert.That(embedding.height, Is.EqualTo(ImageGeometry.EmbeddingImageSize));
+
+            preprocessor.Dispose();
+            source.Release();
+            yield break;
         }
 
         [Test]

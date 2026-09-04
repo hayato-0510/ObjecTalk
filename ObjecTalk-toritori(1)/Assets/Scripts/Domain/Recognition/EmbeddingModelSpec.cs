@@ -14,7 +14,7 @@ namespace ObjecTalk.Domain.Recognition
         public const int ChannelCount = 3;
 
         private const string DefaultModelVersion = "mobilenetv3-small-imagenet-fp16-v1";
-        private const string DefaultPreprocessingVersion = "rgb01-imagenet-mean-std-v1";
+        private const string DefaultPreprocessingVersion = "rgb01-imagenet-mean-std-crop75-upright-v2";
         private const string DefaultInputName = "image";
         private const string DefaultOutputName = "embedding";
         private const int DefaultEmbeddingDimension = 576;
