@@ -11,6 +11,7 @@ using ObjecTalk.Infrastructure.AI;
 using ObjecTalk.Infrastructure.Database;
 using ObjecTalk.Infrastructure.Vision;
 using Unity.InferenceEngine;
+using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Presentation and lifecycle for the camera panel. It owns the camera, the panels, and the
@@ -39,7 +40,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     public static StartupMode DesiredMode { get; set; } = StartupMode.Talk;
     public static EmbeddingObjectMatcher Instance { get; private set; } // Singleton Instance
-    public AdvancedSceneLoader sceneLoader;
+
+    /// <summary>Scene returned to when the user leaves the camera flow.</summary>
+    public const string HomeSceneName = "Myscenes";
 
     // --- App Mode ---
     private AppMode currentMode = AppMode.Recognition;
@@ -74,7 +77,13 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     public Button registerStartButton; // Button in RegisterCameraPanel
     public Button nextButton;
     public Button confirmButton;
-    public Button backButton;
+
+    [Tooltip("Every BackButton inside MatcherRootPanel. All routed to OnBackButtonClicked, which " +
+             "picks the destination from the current mode.")]
+    public Button[] backButtons;
+
+    [Tooltip("The 'finish' button on TalkCameraPanel. Stops the camera and returns to the home scene.")]
+    public Button finishButton;
     public TMP_InputField nameInputField;
     public TMP_InputField categoryInputField;
     public TMP_Text resultText; // Text in TalkCameraPanel
@@ -116,7 +125,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     // --- Recognition pipeline ---
     private ObjectRecognitionService _recognitionService;
     private CameraFramePreprocessor _preprocessor;
-    private AkazeVerifier _verifier;
+    private ILocalFeatureVerifier _verifier;
     private SentisEmbeddingExtractor _extractor;
     private bool _recognitionAvailable;
 
@@ -132,11 +141,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private string _registrationObjectId;
     private bool _cameraAuthorized;
 
-    public void ReturnToHomeAndStopCamera(string sceneAndPanelTarget)
+    /// <summary>Leaves the camera flow: stops the camera and loads the home scene.</summary>
+    public void ReturnToHome()
     {
-        Debug.Log($"Returning to {sceneAndPanelTarget} and stopping camera...");
+        Debug.Log("Returning to the home scene and stopping camera...");
 
-        // 1. カメラを確実に停止させる (OnDisableを呼ぶ)
+        // Deactivating the root panel runs OnDisable, which stops the webcam.
         if (objectMatcherRootPanel != null)
         {
             objectMatcherRootPanel.SetActive(false);
@@ -146,15 +156,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.LogError("objectMatcherRootPanel is not set!");
         }
 
-        // 2. シーンローダーを呼び出す
-        if (sceneLoader != null)
-        {
-            sceneLoader.LoadSceneAndSetPanel(sceneAndPanelTarget);
-        }
-        else
-        {
-            Debug.LogError("AdvancedSceneLoader (sceneLoader) is not assigned in the Inspector!");
-        }
+        SceneManager.LoadScene(HomeSceneName);
     }
 
     void Awake()
@@ -180,8 +182,17 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         if (confirmButton != null) confirmButton.onClick.AddListener(OnConfirmRegistration);
         else Debug.LogError("Confirm Button is not assigned!");
 
-        if (backButton != null) backButton.onClick.AddListener(OnBackButtonClicked);
-        else Debug.LogError("Back Button is not assigned!");
+        if (backButtons != null)
+        {
+            foreach (var back in backButtons)
+            {
+                if (back != null) back.onClick.AddListener(OnBackButtonClicked);
+            }
+        }
+        else Debug.LogError("Back Buttons are not assigned!");
+
+        if (finishButton != null) finishButton.onClick.AddListener(ReturnToHome);
+        else Debug.LogError("Finish Button is not assigned!");
 
         // Toggles
         if (eyeToggle != null) eyeToggle.onValueChanged.AddListener(OnCategoryChanged);
@@ -203,8 +214,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         }
 
         _preprocessor = new CameraFramePreprocessor();
-        _verifier = new AkazeVerifier();
-        _verifier.Initialize();
+        _verifier = BuildLocalFeatureVerifier();
         _extractor = new SentisEmbeddingExtractor();
 
         var spec = EmbeddingModelSpec.Default;
@@ -228,6 +238,29 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             new RecognitionDataVersion(1, spec.ModelVersion, spec.PreprocessingVersion));
         _recognitionService.RecognitionStateChanged += OnServiceRecognitionStateChanged;
         _recognitionAvailable = true;
+    }
+
+    /// <summary>
+    /// AKAZE confirmation needs the OpenCV native library. An ARM64 player without an arm64
+    /// OpenCvSharpExtern throws on the first OpenCV call, so fall back to embedding-only
+    /// recognition rather than losing the whole pipeline. Restoring AKAZE later (adding the
+    /// native library) needs no further code change.
+    /// </summary>
+    private ILocalFeatureVerifier BuildLocalFeatureVerifier()
+    {
+        try
+        {
+            var akaze = new AkazeVerifier();
+            akaze.Initialize();
+            return akaze;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning(
+                "AKAZE local-feature verification is unavailable; recognition will rely on the "
+                + $"embedding model alone. ({e.GetType().Name}: {e.Message})");
+            return new NullLocalFeatureVerifier();
+        }
     }
 
     private RecognitionSettings BuildRecognitionSettings()
