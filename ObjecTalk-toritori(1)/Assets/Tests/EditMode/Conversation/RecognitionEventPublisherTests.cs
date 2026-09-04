@@ -65,5 +65,18 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That(observations, Has.Count.EqualTo(1));
             Assert.That(observations[0].ObjectId, Is.EqualTo("object-2"));
         }
+
+        [Test]
+        public void PublishLegacyState_InvokesStateUpdateBeforeCompatibilityHandler()
+        {
+            var publisher = new RecognitionEventPublisher();
+            bool ownerState = false;
+            bool stateSeenByHandler = false;
+            publisher.LegacyStateChanged += (_, __) => stateSeenByHandler = ownerState;
+
+            publisher.PublishLegacyState(true, "本", () => ownerState = true);
+
+            Assert.That(stateSeenByHandler, Is.True);
+        }
     }
 }

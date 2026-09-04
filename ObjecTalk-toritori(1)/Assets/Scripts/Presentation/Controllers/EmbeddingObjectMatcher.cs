@@ -147,9 +147,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     // --- Private Variables ---
     private readonly Dictionary<string, RegisteredObject> _objectsById =
         new Dictionary<string, RegisteredObject>(StringComparer.Ordinal);
-    private readonly RecognitionEventPublisher _recognitionEvents = new RecognitionEventPublisher(
-        IsObjectRecognized == 1,
-        LastRecognizedObjectName);
+    private readonly RecognitionEventPublisher _recognitionEvents = new RecognitionEventPublisher();
     private Texture2D tempSnapshot;
     private int currentEyeId = -1;
     private int currentMouthId = -1;
@@ -583,15 +581,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 newObjectId,
                 newName,
                 confidence,
-                DateTimeOffset.UtcNow)
-            : _recognitionEvents.PublishLegacyState(isRecognized, newName);
+                DateTimeOffset.UtcNow,
+                ApplyLegacyRecognitionState)
+            : _recognitionEvents.PublishLegacyState(
+                isRecognized,
+                newName,
+                ApplyLegacyRecognitionState);
 
         // 状態が変化した場合のみ処理 (0->1, 1->0, or 1->"A" -> 1->"B")
         if (legacyStateChanged)
         {
-            IsObjectRecognized = newState;
-            LastRecognizedObjectName = newName;
-
             if (resultText != null && DesiredMode == StartupMode.Talk)
             {
                 resultText.text = isRecognized ? newName : RecognitionMessages.Searching;
@@ -605,6 +604,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             {
                 Debug.Log($"★ 物体認識: OFF (0)");
             }
+        }
+
+        void ApplyLegacyRecognitionState()
+        {
+            IsObjectRecognized = newState;
+            LastRecognizedObjectName = newName;
         }
     }
 

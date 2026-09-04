@@ -23,7 +23,8 @@ namespace ObjecTalk.Core.Conversation
             string objectId,
             string objectName,
             float confidence,
-            DateTimeOffset observedAt)
+            DateTimeOffset observedAt,
+            Action beforeLegacyStateChanged = null)
         {
             string normalizedId = isRecognized ? objectId ?? string.Empty : string.Empty;
             string normalizedName = isRecognized ? objectName ?? string.Empty : string.Empty;
@@ -35,10 +36,13 @@ namespace ObjecTalk.Core.Conversation
                 confidence,
                 observedAt));
 
-            return PublishLegacyState(isRecognized, normalizedName);
+            return PublishLegacyState(isRecognized, normalizedName, beforeLegacyStateChanged);
         }
 
-        public bool PublishLegacyState(bool isRecognized, string objectName)
+        public bool PublishLegacyState(
+            bool isRecognized,
+            string objectName,
+            Action beforeLegacyStateChanged = null)
         {
             string normalizedName = isRecognized ? objectName ?? string.Empty : string.Empty;
 
@@ -51,6 +55,7 @@ namespace ObjecTalk.Core.Conversation
 
             _legacyIsRecognized = isRecognized;
             _legacyObjectName = normalizedName;
+            beforeLegacyStateChanged?.Invoke();
             LegacyStateChanged?.Invoke(isRecognized, normalizedName);
             return true;
         }
