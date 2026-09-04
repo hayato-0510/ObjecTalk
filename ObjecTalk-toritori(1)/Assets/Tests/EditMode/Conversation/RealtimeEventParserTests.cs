@@ -91,6 +91,30 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That(realtimeEvent.Transcript, Is.Empty);
         }
 
+        [Test]
+        public void TryParse_ValidJsonWithNonStringFields_ReturnsDeterministicEmptyValues()
+        {
+            const string json = "{\"type\":\"response.output_audio_transcript.done\",\"event_id\":[],\"item_id\":{},\"response_id\":9,\"transcript\":[\"not text\"]}";
+
+            Assert.That(_parser.TryParse(json, out RealtimeEvent realtimeEvent), Is.True);
+
+            Assert.That(realtimeEvent.Kind, Is.EqualTo(RealtimeEventKind.AssistantTranscriptDone));
+            Assert.That(realtimeEvent.EventId, Is.Empty);
+            Assert.That(realtimeEvent.ItemId, Is.Empty);
+            Assert.That(realtimeEvent.ResponseId, Is.Empty);
+            Assert.That(realtimeEvent.Transcript, Is.Empty);
+        }
+
+        [Test]
+        public void TryParse_ValidJsonWithObjectType_ReturnsUnknownWithoutThrowing()
+        {
+            Assert.That(_parser.TryParse("{\"type\":{},\"response\":[]}", out RealtimeEvent realtimeEvent), Is.True);
+
+            Assert.That(realtimeEvent.Kind, Is.EqualTo(RealtimeEventKind.Unknown));
+            Assert.That(realtimeEvent.RawType, Is.Empty);
+            Assert.That(realtimeEvent.ResponseId, Is.Empty);
+        }
+
         [TestCase(null)]
         [TestCase("")]
         [TestCase("{")]

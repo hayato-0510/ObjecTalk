@@ -111,20 +111,55 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
-        public void ExchangeSdpAsync_CallerCancellation_PropagatesCancellation()
+        public void ExchangeSdpAsync_CallerCancellation_InterruptsUncooperativeHttpClient()
         {
             using (var cancellation = new CancellationTokenSource())
             {
-                var httpClient = new FakeHttpClient((request, token) => Task.Delay(Timeout.Infinite, token).ContinueWith(task =>
+                var started = new TaskCompletionSource<bool>();
+                var neverCompletes = new TaskCompletionSource<RealtimeHttpResponse>();
+                var httpClient = new FakeHttpClient((request, token) =>
                 {
-                    task.GetAwaiter().GetResult();
-                    return new RealtimeHttpResponse(200, "application/sdp", "answer");
-                }, TaskScheduler.Default));
+                    started.TrySetResult(true);
+                    return neverCompletes.Task;
+                });
                 var client = new RealtimeCallClient("https://backend.example", new FakeTokenProvider("firebase-token"), httpClient);
+
+                Task exchange = client.ExchangeSdpAsync(LocalSdp, Context, cancellation.Token);
+                Assert.That(started.Task.Wait(100), Is.True);
                 cancellation.Cancel();
 
-                Assert.ThrowsAsync<OperationCanceledException>(async () => await client.ExchangeSdpAsync(LocalSdp, Context, cancellation.Token));
+                Assert.ThrowsAsync<OperationCanceledException>(async () => await exchange);
             }
+        }
+
+        [Test, Timeout(1000)]
+        public void ExchangeSdpAsync_UncooperativeTokenProvider_UsesConfiguredTimeout()
+        {
+            var neverCompletes = new TaskCompletionSource<string>();
+            var client = new RealtimeCallClient(
+                "https://backend.example",
+                new DelegatingTokenProvider((forceRefresh, token) => neverCompletes.Task),
+                new FakeHttpClient(new RealtimeHttpResponse(200, "application/sdp", "answer")),
+                TimeSpan.FromMilliseconds(25));
+
+            RealtimeCallException exception = Assert.ThrowsAsync<RealtimeCallException>(async () => await client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
+
+            Assert.That(exception.Kind, Is.EqualTo(RealtimeCallFailureKind.Timeout));
+        }
+
+        [Test, Timeout(1000)]
+        public void ExchangeSdpAsync_UncooperativeHttpClient_UsesConfiguredTimeout()
+        {
+            var neverCompletes = new TaskCompletionSource<RealtimeHttpResponse>();
+            var client = new RealtimeCallClient(
+                "https://backend.example",
+                new FakeTokenProvider("firebase-token"),
+                new FakeHttpClient((request, token) => neverCompletes.Task),
+                TimeSpan.FromMilliseconds(25));
+
+            RealtimeCallException exception = Assert.ThrowsAsync<RealtimeCallException>(async () => await client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
+
+            Assert.That(exception.Kind, Is.EqualTo(RealtimeCallFailureKind.Timeout));
         }
 
         [Test, Timeout(17000)]
@@ -188,6 +223,21 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             {
                 Request = request;
                 return _send(request, cancellationToken);
+            }
+        }
+
+        private sealed class DelegatingTokenProvider : IIdTokenProvider
+        {
+            private readonly Func<bool, CancellationToken, Task<string>> _getToken;
+
+            public DelegatingTokenProvider(Func<bool, CancellationToken, Task<string>> getToken)
+            {
+                _getToken = getToken;
+            }
+
+            public Task<string> GetAsync(bool forceRefresh, CancellationToken cancellationToken)
+            {
+                return _getToken(forceRefresh, cancellationToken);
             }
         }
     }

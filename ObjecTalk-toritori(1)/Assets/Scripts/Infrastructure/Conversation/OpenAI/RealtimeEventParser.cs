@@ -88,7 +88,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
         private static string ReadString(JObject payload, string propertyName)
         {
-            return payload == null ? string.Empty : (string)payload[propertyName] ?? string.Empty;
+            JToken token = payload?[propertyName];
+            return token != null && token.Type == JTokenType.String ? (string)token : string.Empty;
         }
     }
 }

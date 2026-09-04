@@ -105,16 +105,28 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
     public sealed class RealtimeCallClient
     {
-        private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(15);
         private readonly string _backendBaseUrl;
         private readonly IIdTokenProvider _tokenProvider;
         private readonly IRealtimeHttpClient _httpClient;
+        private readonly TimeSpan _requestTimeout;
 
         public RealtimeCallClient(string backendBaseUrl, IIdTokenProvider tokenProvider, IRealtimeHttpClient httpClient)
+            : this(backendBaseUrl, tokenProvider, httpClient, DefaultRequestTimeout)
+        {
+        }
+
+        public RealtimeCallClient(string backendBaseUrl, IIdTokenProvider tokenProvider, IRealtimeHttpClient httpClient, TimeSpan requestTimeout)
         {
             _backendBaseUrl = backendBaseUrl;
             _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            if (requestTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(requestTimeout));
+            }
+
+            _requestTimeout = requestTimeout;
         }
 
         public async Task<string> ExchangeSdpAsync(string localSdp, ConversationContext context, CancellationToken cancellationToken)
@@ -127,14 +139,14 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             Uri endpoint = BuildEndpoint(_backendBaseUrl);
             cancellationToken.ThrowIfCancellationRequested();
 
-            using (var timeoutSource = new CancellationTokenSource(RequestTimeout))
+            using (var timeoutSource = new CancellationTokenSource(_requestTimeout))
             using (var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token))
             {
                 CancellationToken requestToken = linkedSource.Token;
                 string firebaseToken;
                 try
                 {
-                    firebaseToken = await _tokenProvider.GetAsync(false, requestToken);
+                    firebaseToken = await AwaitWithCancellation(_tokenProvider.GetAsync(false, requestToken), requestToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -160,7 +172,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 RealtimeHttpResponse response;
                 try
                 {
-                    response = await _httpClient.SendAsync(request, requestToken);
+                    response = await AwaitWithCancellation(_httpClient.SendAsync(request, requestToken), requestToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -231,6 +243,33 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         private static void ThrowForCancellation(CancellationToken callerToken)
         {
             callerToken.ThrowIfCancellationRequested();
+        }
+
+        private static async Task<T> AwaitWithCancellation<T>(Task<T> task, CancellationToken cancellationToken)
+        {
+            if (task == null)
+            {
+                throw new InvalidOperationException("Realtime operation is unavailable.");
+            }
+
+            var cancellation = new TaskCompletionSource<bool>();
+            using (cancellationToken.Register(() => cancellation.TrySetResult(true)))
+            {
+                if (await Task.WhenAny(task, cancellation.Task) == task)
+                {
+                    return await task;
+                }
+            }
+
+            ObserveAbandonedFault(task);
+            throw new OperationCanceledException(cancellationToken);
+        }
+
+        private static void ObserveAbandonedFault(Task task)
+        {
+            task.ContinueWith(
+                completed => { var ignored = completed.Exception; },
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
         }
 
         private static bool IsSameOrigin(Uri expected, Uri actual)
