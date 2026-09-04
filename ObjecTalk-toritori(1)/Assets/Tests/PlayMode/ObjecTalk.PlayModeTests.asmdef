@@ -11,7 +11,9 @@
     "ObjecTalk.Core.Recognition",
     "ObjecTalk.Infrastructure.Database",
     "ObjecTalk.TestDoubles",
-    "SQLiteNet"
+    "SQLiteNet",
+    "ObjecTalk.Domain.Conversation",
+    "ObjecTalk.Infrastructure.Conversation"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
