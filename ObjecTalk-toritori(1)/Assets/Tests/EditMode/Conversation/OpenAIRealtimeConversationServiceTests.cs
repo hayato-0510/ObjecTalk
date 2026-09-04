@@ -93,6 +93,60 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public async Task StartAsync_CancellationWhileWaitingForAdmission_DoesNotCancelActiveGeneration()
+        {
+            var transport = new FakeTransport();
+            transport.Failures.Enqueue(new RealtimeCallException(RealtimeCallFailureKind.Network));
+            var delay = new ControllableDelayProvider();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, delay);
+            Task activeStart = service.StartAsync(Context, CancellationToken.None);
+            Assert.That(delay.Started.Task.Wait(100), Is.True);
+
+            using (var cancellation = new CancellationTokenSource())
+            {
+                Task waitingStart = service.StartAsync(new ConversationContext("book", "Book", string.Empty, "user-1", "ja"), cancellation.Token);
+                cancellation.Cancel();
+
+                await AssertCanceledAsync(() => waitingStart);
+            }
+
+            Assert.That(delay.ActiveToken.IsCancellationRequested, Is.False);
+            delay.Release();
+            await activeStart;
+
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+            Assert.That(transport.ConnectCalls, Is.EqualTo(2));
+            Assert.That(transport.DisconnectCalls, Is.Zero);
+        }
+
+        [Test]
+        public async Task StopAsync_CancellationWhileWaitingForAdmission_DoesNotCancelActiveGeneration()
+        {
+            var transport = new FakeTransport();
+            transport.Failures.Enqueue(new RealtimeCallException(RealtimeCallFailureKind.Network));
+            var delay = new ControllableDelayProvider();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, delay);
+            Task activeStart = service.StartAsync(Context, CancellationToken.None);
+            Assert.That(delay.Started.Task.Wait(100), Is.True);
+
+            using (var cancellation = new CancellationTokenSource())
+            {
+                Task waitingStop = service.StopAsync(ConversationStopReason.UserRequested, cancellation.Token);
+                cancellation.Cancel();
+
+                await AssertCanceledAsync(() => waitingStop);
+            }
+
+            Assert.That(delay.ActiveToken.IsCancellationRequested, Is.False);
+            delay.Release();
+            await activeStart;
+
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+            Assert.That(transport.ConnectCalls, Is.EqualTo(2));
+            Assert.That(transport.DisconnectCalls, Is.Zero);
+        }
+
+        [Test]
         public async Task StartAsync_TransientFailureThenSuccess_ReturnsToConnectingAndListening()
         {
             var transport = new FakeTransport();
@@ -439,6 +493,28 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             {
                 Started.TrySetResult(true);
                 await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+        }
+
+        private sealed class ControllableDelayProvider : IConversationDelayProvider
+        {
+            private readonly TaskCompletionSource<bool> _released = new TaskCompletionSource<bool>();
+
+            public TaskCompletionSource<bool> Started { get; } = new TaskCompletionSource<bool>();
+
+            public CancellationToken ActiveToken { get; private set; }
+
+            public async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
+            {
+                ActiveToken = cancellationToken;
+                Started.TrySetResult(true);
+                await _released.Task;
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            public void Release()
+            {
+                _released.TrySetResult(true);
             }
         }
 

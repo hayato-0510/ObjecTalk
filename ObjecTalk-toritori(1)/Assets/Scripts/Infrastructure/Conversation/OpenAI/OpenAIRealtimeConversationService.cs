@@ -96,13 +96,12 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             }
 
             long generation = 0;
-            cancellationToken.ThrowIfCancellationRequested();
-            CancelActiveOperation();
             await _operationGate.WaitAsync(cancellationToken);
             Interlocked.Increment(ref _lifecycleOperationCount);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                CancelActiveOperation();
                 if (!await StopActiveSessionAsync())
                 {
                     return;
@@ -225,13 +224,12 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
         public async Task StopAsync(ConversationStopReason reason, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            CancelActiveOperation();
             await _operationGate.WaitAsync(cancellationToken);
             Interlocked.Increment(ref _lifecycleOperationCount);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                CancelActiveOperation();
                 await StopActiveSessionAsync();
             }
             finally
