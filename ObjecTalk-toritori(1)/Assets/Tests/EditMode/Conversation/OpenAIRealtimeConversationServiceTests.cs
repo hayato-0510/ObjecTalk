@@ -54,6 +54,45 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public async Task StartAsync_PreCanceledToken_LeavesLiveSessionIntact()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+            using (var cancellation = new CancellationTokenSource())
+            {
+                cancellation.Cancel();
+
+                await AssertCanceledAsync(() => service.StartAsync(new ConversationContext("book", "Book", string.Empty, "user-1", "ja"), cancellation.Token));
+            }
+
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+            Assert.That(transport.ConnectCalls, Is.EqualTo(1));
+            Assert.That(transport.DisconnectCalls, Is.Zero);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Speaking));
+        }
+
+        [Test]
+        public async Task StopAsync_PreCanceledToken_LeavesLiveSessionIntact()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+            using (var cancellation = new CancellationTokenSource())
+            {
+                cancellation.Cancel();
+
+                await AssertCanceledAsync(() => service.StopAsync(ConversationStopReason.UserRequested, cancellation.Token));
+            }
+
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+            Assert.That(transport.DisconnectCalls, Is.Zero);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Speaking));
+        }
+
+        [Test]
         public async Task StartAsync_TransientFailureThenSuccess_ReturnsToConnectingAndListening()
         {
             var transport = new FakeTransport();
@@ -127,6 +166,41 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public async Task StartAsync_PermissionException_PublishesSafeFailureAndDisposesEventSubscription()
+        {
+            var permission = new FakePermissionService(MicrophonePermissionStatus.Granted) { ExceptionToThrow = new InvalidOperationException("permission diagnostic") };
+            var transport = new FakeTransport();
+            var service = CreateService(permission, transport, new FakeDelayProvider());
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+
+            await service.StartAsync(Context, CancellationToken.None);
+
+            Assert.That(failures.Single().Code, Is.EqualTo("microphone_permission_failed"));
+            Assert.That(failures.Single().UserMessage, Does.Not.Contain("permission diagnostic"));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Idle));
+            Assert.That(transport.SubscriberCount, Is.Zero);
+        }
+
+        [Test]
+        public async Task StartAsync_RetryDelayException_PublishesSafeFailureAndDisposesEventSubscription()
+        {
+            var transport = new FakeTransport();
+            transport.Failures.Enqueue(new RealtimeCallException(RealtimeCallFailureKind.Network));
+            var delay = new FakeDelayProvider { ExceptionToThrow = new InvalidOperationException("delay diagnostic") };
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, delay);
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+
+            await service.StartAsync(Context, CancellationToken.None);
+
+            Assert.That(failures.Single().Code, Is.EqualTo("realtime_retry_delay_failed"));
+            Assert.That(failures.Single().UserMessage, Does.Not.Contain("delay diagnostic"));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Idle));
+            Assert.That(transport.SubscriberCount, Is.Zero);
+        }
+
+        [Test]
         public async Task StartAsync_CallerCancellationDuringReconnect_AbortsRetriesAndReturnsIdle()
         {
             var transport = new FakeTransport();
@@ -167,6 +241,24 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That(transport.CancelResponseCalls, Is.EqualTo(1));
             Assert.That(transport.StopRemotePlaybackCalls, Is.EqualTo(1));
             Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+        }
+
+        [Test]
+        public async Task SpeechStartedWhenCancelThrows_StopsPlaybackReturnsToListeningAndPublishesSafeFailure()
+        {
+            var transport = new FakeTransport { CancelException = new InvalidOperationException("cancel diagnostic") };
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.SpeechStarted, "input_audio_buffer.speech_started", "", "", "", "", "", ""));
+
+            Assert.That(transport.OperationLog, Is.EqualTo(new[] { "connect:apple", "stop-playback", "cancel-response" }));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+            Assert.That(failures.Single().Code, Is.EqualTo("realtime_response_cancel_failed"));
+            Assert.That(failures.Single().UserMessage, Does.Not.Contain("cancel diagnostic"));
         }
 
         [Test]
@@ -225,6 +317,44 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public async Task StopAsync_DisconnectException_PublishesSafeFailureAndStillCleansUp()
+        {
+            var transport = new FakeTransport { DisconnectException = new InvalidOperationException("disconnect diagnostic") };
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+            await service.StartAsync(Context, CancellationToken.None);
+
+            await service.StopAsync(ConversationStopReason.UserRequested, CancellationToken.None);
+
+            Assert.That(failures.Single().Code, Is.EqualTo("realtime_disconnect_failed"));
+            Assert.That(failures.Single().UserMessage, Does.Not.Contain("disconnect diagnostic"));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Idle));
+            Assert.That(transport.SubscriberCount, Is.Zero);
+        }
+
+        [Test]
+        public async Task StateChangedHandler_CanSynchronouslyStopWithoutDeadlock()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            service.StateChanged += state =>
+            {
+                if (state == ConversationState.Listening)
+                {
+                    service.StopAsync(ConversationStopReason.UserRequested, CancellationToken.None).GetAwaiter().GetResult();
+                }
+            };
+
+            Task start = Task.Run(async () => await service.StartAsync(Context, CancellationToken.None));
+            Assert.That(await Task.WhenAny(start, Task.Delay(250)), Is.SameAs(start));
+            await start;
+
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Idle));
+            Assert.That(transport.DisconnectCalls, Is.EqualTo(1));
+        }
+
+        [Test]
         public async Task TranscriptEvents_AreForwardedWithoutRetainingThemAfterStop()
         {
             var transport = new FakeTransport();
@@ -248,6 +378,18 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             return new OpenAIRealtimeConversationService(new ConversationStateMachine(), permission, transport, delay);
         }
 
+        private static async Task AssertCanceledAsync(Func<Task> operation)
+        {
+            try
+            {
+                await operation();
+                Assert.Fail("The pre-canceled operation must not complete successfully.");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
         private sealed class FakePermissionService : IMicrophonePermissionService
         {
             private readonly MicrophonePermissionStatus _status;
@@ -257,9 +399,16 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 _status = status;
             }
 
+            public Exception ExceptionToThrow { get; set; }
+
             public Task<MicrophonePermissionStatus> RequestAsync(CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (ExceptionToThrow != null)
+                {
+                    throw ExceptionToThrow;
+                }
+
                 return Task.FromResult(_status);
             }
         }
@@ -267,11 +416,17 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         private sealed class FakeDelayProvider : IConversationDelayProvider
         {
             public List<TimeSpan> Delays { get; } = new List<TimeSpan>();
+            public Exception ExceptionToThrow { get; set; }
 
             public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Delays.Add(delay);
+                if (ExceptionToThrow != null)
+                {
+                    throw ExceptionToThrow;
+                }
+
                 return Task.CompletedTask;
             }
         }
@@ -299,6 +454,9 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             public int DisconnectCalls { get; private set; }
             public int CancelResponseCalls { get; private set; }
             public int StopRemotePlaybackCalls { get; private set; }
+            public Exception CancelException { get; set; }
+            public Exception DisconnectException { get; set; }
+            public int SubscriberCount => _eventReceived == null ? 0 : _eventReceived.GetInvocationList().Length;
 
             public event Action<RealtimeEvent> EventReceived
             {
@@ -333,12 +491,19 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 CancelResponseCalls++;
+                OperationLog.Add("cancel-response");
+                if (CancelException != null)
+                {
+                    throw CancelException;
+                }
+
                 return Task.CompletedTask;
             }
 
             public void StopRemotePlayback()
             {
                 StopRemotePlaybackCalls++;
+                OperationLog.Add("stop-playback");
             }
 
             public Task DisconnectAsync(CancellationToken cancellationToken)
@@ -346,6 +511,11 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 cancellationToken.ThrowIfCancellationRequested();
                 DisconnectCalls++;
                 OperationLog.Add("disconnect");
+                if (DisconnectException != null)
+                {
+                    throw DisconnectException;
+                }
+
                 return Task.CompletedTask;
             }
 

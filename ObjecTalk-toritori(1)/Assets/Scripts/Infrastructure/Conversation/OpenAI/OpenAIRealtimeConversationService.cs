@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ObjecTalk.Core.Conversation;
@@ -48,9 +49,13 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         private readonly IConversationDelayProvider _delayProvider;
         private readonly SemaphoreSlim _operationGate = new SemaphoreSlim(1, 1);
         private readonly object _sync = new object();
+        private readonly object _publishedEventsSync = new object();
+        private readonly Queue<Action> _publishedEvents = new Queue<Action>();
         private CancellationTokenSource _activeOperation;
         private Action<RealtimeEvent> _transportEventHandler;
         private long _transportGeneration;
+        private int _lifecycleOperationCount;
+        private int _isDispatchingPublishedEvents;
 
         public OpenAIRealtimeConversationService(
             ConversationStateMachine stateMachine,
@@ -91,12 +96,17 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             }
 
             long generation = 0;
+            cancellationToken.ThrowIfCancellationRequested();
             CancelActiveOperation();
-            await _operationGate.WaitAsync(CancellationToken.None);
+            await _operationGate.WaitAsync(cancellationToken);
+            Interlocked.Increment(ref _lifecycleOperationCount);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await StopActiveSessionAsync();
+                if (!await StopActiveSessionAsync())
+                {
+                    return;
+                }
 
                 CancellationToken operationToken;
                 lock (_sync)
@@ -112,7 +122,25 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                     return;
                 }
 
-                MicrophonePermissionStatus permission = await _microphonePermission.RequestAsync(operationToken);
+                MicrophonePermissionStatus permission;
+                try
+                {
+                    permission = await _microphonePermission.RequestAsync(operationToken);
+                }
+                catch (OperationCanceledException) when (operationToken.IsCancellationRequested)
+                {
+                    FinishSession(generation);
+                    throw;
+                }
+                catch (Exception)
+                {
+                    PublishFailure(CreateOperationFailure(
+                        "microphone_permission_failed",
+                        "マイクの利用を確認できませんでした。もう一度お試しください。"));
+                    FinishSession(generation);
+                    return;
+                }
+
                 if (permission != MicrophonePermissionStatus.Granted)
                 {
                     PublishFailure(CreatePermissionFailure(permission));
@@ -151,7 +179,24 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                         }
 
                         TryPublishState(ConversationState.Reconnecting, generation);
-                        await _delayProvider.DelayAsync(ReconnectDelays[attempt], operationToken);
+                        try
+                        {
+                            await _delayProvider.DelayAsync(ReconnectDelays[attempt], operationToken);
+                        }
+                        catch (OperationCanceledException) when (operationToken.IsCancellationRequested)
+                        {
+                            FinishSession(generation);
+                            throw;
+                        }
+                        catch (Exception)
+                        {
+                            PublishFailure(CreateOperationFailure(
+                                "realtime_retry_delay_failed",
+                                "再接続を続けられませんでした。もう一度お試しください。"));
+                            FinishSession(generation);
+                            return;
+                        }
+
                         if (!IsActiveGeneration(generation))
                         {
                             return;
@@ -172,14 +217,18 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             }
             finally
             {
+                Interlocked.Decrement(ref _lifecycleOperationCount);
                 _operationGate.Release();
+                DispatchPublishedEvents();
             }
         }
 
         public async Task StopAsync(ConversationStopReason reason, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             CancelActiveOperation();
-            await _operationGate.WaitAsync(CancellationToken.None);
+            await _operationGate.WaitAsync(cancellationToken);
+            Interlocked.Increment(ref _lifecycleOperationCount);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -187,11 +236,13 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             }
             finally
             {
+                Interlocked.Decrement(ref _lifecycleOperationCount);
                 _operationGate.Release();
+                DispatchPublishedEvents();
             }
         }
 
-        private async Task StopActiveSessionAsync()
+        private async Task<bool> StopActiveSessionAsync()
         {
             long generation;
             ConversationState state;
@@ -203,13 +254,21 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
             if (state == ConversationState.Idle)
             {
-                return;
+                return true;
             }
 
             TryPublishState(ConversationState.Stopping, generation);
             try
             {
                 await _transport.DisconnectAsync(CancellationToken.None);
+                return true;
+            }
+            catch (Exception)
+            {
+                PublishFailure(CreateOperationFailure(
+                    "realtime_disconnect_failed",
+                    "音声会話を安全に終了できませんでした。もう一度お試しください。"));
+                return false;
             }
             finally
             {
@@ -260,17 +319,39 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 case RealtimeEventKind.SpeechStarted:
                     if (CurrentState == ConversationState.Speaking)
                     {
-                        ObserveFault(_transport.CancelResponseAsync(CancellationToken.None));
-                        _transport.StopRemotePlayback();
-                        TryPublishState(ConversationState.Listening, generation);
+                        try
+                        {
+                            _transport.StopRemotePlayback();
+                        }
+                        catch (Exception)
+                        {
+                            PublishFailure(CreateOperationFailure(
+                                "realtime_playback_stop_failed",
+                                "音声出力を停止できませんでした。"));
+                        }
+
+                        try
+                        {
+                            ObserveCancellationFailure(_transport.CancelResponseAsync(CancellationToken.None));
+                        }
+                        catch (Exception)
+                        {
+                            PublishFailure(CreateOperationFailure(
+                                "realtime_response_cancel_failed",
+                                "応答の停止を確認できませんでした。"));
+                        }
+                        finally
+                        {
+                            TryPublishState(ConversationState.Listening, generation);
+                        }
                     }
                     break;
                 case RealtimeEventKind.UserTranscriptCompleted:
-                    UserTranscriptReceived?.Invoke(realtimeEvent.Transcript);
+                    PublishEvent(() => UserTranscriptReceived?.Invoke(realtimeEvent.Transcript));
                     break;
                 case RealtimeEventKind.AssistantTranscriptDelta:
                 case RealtimeEventKind.AssistantTranscriptDone:
-                    AssistantTranscriptReceived?.Invoke(realtimeEvent.Transcript);
+                    PublishEvent(() => AssistantTranscriptReceived?.Invoke(realtimeEvent.Transcript));
                     break;
                 case RealtimeEventKind.ResponseStarted:
                     TryPublishState(ConversationState.Speaking, generation);
@@ -297,7 +378,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
             if (changed)
             {
-                StateChanged?.Invoke(state);
+                PublishEvent(() => StateChanged?.Invoke(state));
             }
 
             return changed;
@@ -333,7 +414,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             completedOperation?.Dispose();
             if (changed)
             {
-                StateChanged?.Invoke(ConversationState.Idle);
+                PublishEvent(() => StateChanged?.Invoke(ConversationState.Idle));
             }
         }
 
@@ -383,19 +464,102 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
         private void PublishFailure(ConversationFailure failure)
         {
-            ErrorOccurred?.Invoke(failure);
+            PublishEvent(() => ErrorOccurred?.Invoke(failure));
         }
 
-        private static void ObserveFault(Task task)
+        private static ConversationFailure CreateOperationFailure(string code, string userMessage)
         {
-            if (task == null || task.IsCompleted)
+            return new ConversationFailure(code, false, userMessage);
+        }
+
+        private void ObserveCancellationFailure(Task task)
+        {
+            if (task == null)
+            {
+                PublishFailure(CreateOperationFailure(
+                    "realtime_response_cancel_failed",
+                    "応答の停止を確認できませんでした。"));
+                return;
+            }
+
+            if (task.IsFaulted)
+            {
+                PublishFailure(CreateOperationFailure(
+                    "realtime_response_cancel_failed",
+                    "応答の停止を確認できませんでした。"));
+                return;
+            }
+
+            if (task.IsCompleted)
             {
                 return;
             }
 
             task.ContinueWith(
-                completed => { var ignored = completed.Exception; },
+                completed => PublishFailure(CreateOperationFailure(
+                    "realtime_response_cancel_failed",
+                    "応答の停止を確認できませんでした。")),
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+        }
+
+        private void PublishEvent(Action publishedEvent)
+        {
+            if (publishedEvent == null)
+            {
+                return;
+            }
+
+            lock (_publishedEventsSync)
+            {
+                _publishedEvents.Enqueue(publishedEvent);
+            }
+
+            DispatchPublishedEvents();
+        }
+
+        private void DispatchPublishedEvents()
+        {
+            if (Volatile.Read(ref _lifecycleOperationCount) != 0 ||
+                Interlocked.CompareExchange(ref _isDispatchingPublishedEvents, 1, 0) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                while (Volatile.Read(ref _lifecycleOperationCount) == 0)
+                {
+                    Action publishedEvent;
+                    lock (_publishedEventsSync)
+                    {
+                        if (_publishedEvents.Count == 0)
+                        {
+                            return;
+                        }
+
+                        publishedEvent = _publishedEvents.Dequeue();
+                    }
+
+                    publishedEvent();
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _isDispatchingPublishedEvents, 0);
+                if (Volatile.Read(ref _lifecycleOperationCount) == 0)
+                {
+                    bool hasPendingEvents;
+                    lock (_publishedEventsSync)
+                    {
+                        hasPendingEvents = _publishedEvents.Count > 0;
+                    }
+
+                    if (hasPendingEvents)
+                    {
+                        DispatchPublishedEvents();
+                    }
+                }
+            }
         }
     }
 }
