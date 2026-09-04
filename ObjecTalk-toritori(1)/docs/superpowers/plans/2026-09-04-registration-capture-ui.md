@@ -20,6 +20,7 @@
 - Pre-change embedding samples are discarded, not migrated. Object names, images, and eye/mouth placement survive (handled by the existing `InvalidateObsolete`, which only nulls feature blobs).
 - No custom shader that could be stripped from the IL2CPP build: use `Graphics.Blit`'s default material or a shader registered in Always Included Shaders / loaded from `Resources`.
 - Pure geometry and copy live in `Assets/Scripts/Domain/Recognition/` and are covered by EditMode tests. MonoBehaviour wiring is verified by `uloop compile` plus the on-device smoke test in Task 7.
+- **Amendment (controller Ruling T2-1b):** `ObjecTalk.Domain.Recognition` stays engine-free (`noEngineReferences: true`, files `using System;` only). Domain APIs must NOT take or return `UnityEngine.Vector2`. `FrameOrientation.SourceUVsForOrientedCorners()` returns `(float u, float v)[]`. `RegistrationGuideLayout.FrameSize(...)` takes floats and returns a `float` square side. The controller (Task 3/5) converts to `Vector2` at its own boundary. Any `Vector2` in the Task 3/5 code blocks or their test blocks below is superseded by this amendment.
 - Android (Samsung SC-03L / Android 12 / arm64) is the runtime target; the Editor must still compile and run its tests without a camera.
 - `uloop` is at `C:\Users\cadix\AppData\Local\Programs\uloop\bin\uloop.exe` (not on PATH). It is single-flight; never run two `uloop` commands at once.
 - Commit only the files a task names. The Unity scene and most assets are git-untracked and stay that way.
@@ -186,12 +187,12 @@ git commit -m "feat: add crop-fraction overloads to ImageGeometry"
 - Create: `Assets/Tests/EditMode/FrameOrientationTests.cs`
 
 **Interfaces:**
-- Consumes: nothing from earlier tasks. `UnityEngine.Vector2` only (already referenced by the assembly).
+- Consumes: nothing from earlier tasks. `using System;` only — the assembly stays engine-free (Ruling T2-1b).
 - Produces:
   - `readonly struct FrameOrientation` with `int RotationDegrees` (0/90/180/270) and `bool Mirrored`.
   - `static FrameOrientation FrameOrientation.FromWebCam(int videoRotationAngle, bool videoVerticallyMirrored)` — normalizes the angle to one of 0/90/180/270.
   - `(int width, int height) FrameOrientation.OrientedSize(int sourceWidth, int sourceHeight)` — swaps width/height for 90 and 270.
-  - `Vector2[] FrameOrientation.SourceUVsForOrientedCorners()` — returns the 4 source UVs (bottom-left, bottom-right, top-right, top-left of the *oriented* quad) to sample when drawing an upright frame. Used by the controller's blit in Task 3.
+  - `(float u, float v)[] FrameOrientation.SourceUVsForOrientedCorners()` — returns the 4 source UVs (bottom-left, bottom-right, top-right, top-left of the *oriented* quad) to sample when drawing an upright frame. Used by the controller's blit in Task 3.
   - `bool FrameOrientation.IsIdentity` — true when `RotationDegrees == 0 && !Mirrored`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -481,8 +482,10 @@ private void RenderOrientedFrame()
         return;
     }
 
-    var uv = _frameOrientation.SourceUVsForOrientedCorners();
-    _orientQuad.SetUVs(0, new List<Vector2>(uv));
+    var uv = _frameOrientation.SourceUVsForOrientedCorners(); // (float u, float v)[]
+    var uvList = new List<Vector2>(4);
+    foreach (var corner in uv) uvList.Add(new Vector2(corner.u, corner.v));
+    _orientQuad.SetUVs(0, uvList);
     _orientQuad.UploadMeshData(false);
 
     var previous = RenderTexture.active;
@@ -730,7 +733,7 @@ git commit -m "feat: crop the embedding frame to 75% and bump the preprocessing 
 - Produces:
   - `string RecognitionMessages.RegistrationViewPrompt(int nextView, int totalViews)` — e.g. `"1 / 3 枚目 — 物体を枠の中央に収めて撮影"`.
   - `string RecognitionMessages.RegistrationAngleHint` — `"角度を少し変えてください"`.
-  - `static Vector2 RegistrationGuideLayout.FrameSize(Vector2 previewSize, float cropFraction)` — the guide rect's size: a centered square of `cropFraction * min(previewSize.x, previewSize.y)`.
+  - `static float RegistrationGuideLayout.FrameSize(float previewWidth, float previewHeight, float cropFraction)` — the guide square's side length: `clamp(cropFraction, 0, 1) * min(previewWidth, previewHeight)`. Engine-free (Ruling T2-1b); the controller wraps the result in `new Vector2(side, side)`.
   - Serialized fields on `EmbeddingObjectMatcher`: `Image[] registrationDots`, `RectTransform captureGuideFrame`, `TMP_Text registrationInstructionText`. (`registrationStatusText` already exists.)
 
 - [ ] **Step 1: Write the failing copy + layout tests**
@@ -766,29 +769,37 @@ namespace ObjecTalk.Tests.EditMode
 `Assets/Tests/EditMode/RegistrationGuideLayoutTests.cs`:
 
 ```csharp
+using System;
 using NUnit.Framework;
 using ObjecTalk.Domain.Recognition;
-using UnityEngine;
 
 namespace ObjecTalk.Tests.EditMode
 {
     public class RegistrationGuideLayoutTests
     {
         [Test]
-        public void FrameSize_IsACenteredSquareOfTheFractionOfTheShortSide()
+        public void FrameSize_IsTheFractionOfTheShortSide()
         {
-            var size = RegistrationGuideLayout.FrameSize(new Vector2(1080, 1920), 0.75f);
+            var side = RegistrationGuideLayout.FrameSize(1080f, 1920f, 0.75f);
 
-            Assert.That(size.x, Is.EqualTo(810f).Within(0.01f)); // 0.75 * 1080
-            Assert.That(size.y, Is.EqualTo(810f).Within(0.01f));
+            Assert.That(side, Is.EqualTo(810f).Within(0.01f)); // 0.75 * 1080
         }
 
         [Test]
         public void FrameSize_ClampsFractionToOne()
         {
-            var size = RegistrationGuideLayout.FrameSize(new Vector2(600, 800), 2f);
+            var side = RegistrationGuideLayout.FrameSize(600f, 800f, 2f);
 
-            Assert.That(size.x, Is.EqualTo(600f).Within(0.01f));
+            Assert.That(side, Is.EqualTo(600f).Within(0.01f));
+        }
+
+        [TestCase(0f)]
+        [TestCase(-10f)]
+        public void FrameSize_WithNonPositivePreview_Throws(float previewWidth)
+        {
+            Assert.That(
+                () => RegistrationGuideLayout.FrameSize(previewWidth, 800f, 0.75f),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
         }
     }
 }
@@ -830,26 +841,25 @@ public const string RegistrationAngleHint = "角度を少し変えてくださ�
 
 ```csharp
 using System;
-using UnityEngine;
 
 namespace ObjecTalk.Domain.Recognition
 {
     /// <summary>
-    /// Size of the on-preview capture guide: a centered square matching the fraction of the
-    /// camera frame the embedding actually keeps. Pure maths so it is testable without a canvas.
+    /// Side length of the on-preview capture guide: a centered square matching the fraction of the
+    /// camera frame the embedding actually keeps. Engine-free maths so it is testable without a
+    /// canvas (Ruling T2-1b — no UnityEngine types in this assembly).
     /// </summary>
     public static class RegistrationGuideLayout
     {
-        public static Vector2 FrameSize(Vector2 previewSize, float cropFraction)
+        public static float FrameSize(float previewWidth, float previewHeight, float cropFraction)
         {
-            if (previewSize.x <= 0f || previewSize.y <= 0f)
+            if (previewWidth <= 0f || previewHeight <= 0f)
             {
-                throw new ArgumentOutOfRangeException(nameof(previewSize), "The preview has no size.");
+                throw new ArgumentOutOfRangeException(nameof(previewWidth), "The preview has no size.");
             }
 
-            var fraction = Mathf.Clamp(cropFraction, 0f, 1f);
-            var side = Mathf.Min(previewSize.x, previewSize.y) * fraction;
-            return new Vector2(side, side);
+            var fraction = Math.Min(1f, Math.Max(0f, cropFraction));
+            return Math.Min(previewWidth, previewHeight) * fraction;
         }
     }
 }
@@ -935,7 +945,8 @@ private void SetGuideFrameActive(bool active)
     var previewSize = parent != null ? parent.rect.size : captureGuideFrame.rect.size;
     if (previewSize.x > 0f && previewSize.y > 0f)
     {
-        captureGuideFrame.sizeDelta = RegistrationGuideLayout.FrameSize(previewSize, guideFractionOfPreview);
+        var side = RegistrationGuideLayout.FrameSize(previewSize.x, previewSize.y, guideFractionOfPreview);
+        captureGuideFrame.sizeDelta = new Vector2(side, side);
         captureGuideFrame.anchoredPosition = Vector2.zero;
     }
 }
