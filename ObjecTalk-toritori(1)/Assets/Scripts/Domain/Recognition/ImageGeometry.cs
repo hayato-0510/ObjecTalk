@@ -114,6 +114,9 @@ namespace ObjecTalk.Domain.Recognition
         /// <summary>Square input side required by the exported embedding model.</summary>
         public const int EmbeddingImageSize = 224;
 
+        /// <summary>Fraction of the short side kept by the registration/recognition center crop.</summary>
+        public const float DefaultCropFraction = 0.75f;
+
         /// <summary>Upper bound for the CPU-readable image handed to AKAZE.</summary>
         public const int MaximumVerificationImageSize = 320;
 
@@ -134,6 +137,39 @@ namespace ObjecTalk.Domain.Recognition
         public static NormalizedRect NormalizedCenterCrop(int sourceWidth, int sourceHeight)
         {
             var crop = CenterCrop(sourceWidth, sourceHeight);
+            return new NormalizedRect(
+                crop.Width / (float)sourceWidth,
+                crop.Height / (float)sourceHeight,
+                crop.X / (float)sourceWidth,
+                crop.Y / (float)sourceHeight);
+        }
+
+        /// <summary>
+        /// Centered square covering <paramref name="cropFraction"/> of the source's short side.
+        /// <paramref name="cropFraction"/> must be in the range (0, 1]; a value of 1 matches
+        /// <see cref="CenterCrop(int, int)"/>.
+        /// </summary>
+        public static PixelRect CenterCrop(int sourceWidth, int sourceHeight, float cropFraction)
+        {
+            ValidateSourceSize(sourceWidth, sourceHeight);
+            if (cropFraction <= 0f || cropFraction > 1f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(cropFraction), "The crop fraction must be in the range (0, 1].");
+            }
+
+            var shortSide = Math.Min(sourceWidth, sourceHeight);
+            var side = (int)Math.Round(shortSide * cropFraction, MidpointRounding.AwayFromZero);
+            side = Math.Max(1, Math.Min(side, shortSide));
+            return new PixelRect((sourceWidth - side) / 2, (sourceHeight - side) / 2, side, side);
+        }
+
+        /// <summary>
+        /// <see cref="CenterCrop(int, int, float)"/> expressed as the scale and offset of a normalized blit.
+        /// </summary>
+        public static NormalizedRect NormalizedCenterCrop(int sourceWidth, int sourceHeight, float cropFraction)
+        {
+            var crop = CenterCrop(sourceWidth, sourceHeight, cropFraction);
             return new NormalizedRect(
                 crop.Width / (float)sourceWidth,
                 crop.Height / (float)sourceHeight,
