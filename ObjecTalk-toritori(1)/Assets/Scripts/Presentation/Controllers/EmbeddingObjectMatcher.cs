@@ -37,13 +37,21 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     /// 認識状態が変化したときに発火するイベント
     /// (bool isRecognized, string objectName)
     /// </summary>
-    public event Action<bool, string> OnRecognitionStateChanged;
+    public event Action<bool, string> OnRecognitionStateChanged
+    {
+        add => _recognitionEvents.LegacyStateChanged += value;
+        remove => _recognitionEvents.LegacyStateChanged -= value;
+    }
 
     /// <summary>
     /// Raised when recognition changes, carrying the persisted object identity for conversation
     /// consumers. The name-only event remains for existing scene and prefab consumers.
     /// </summary>
-    public event Action<RecognizedObjectState> RecognitionChanged;
+    public event Action<RecognizedObjectState> RecognitionChanged
+    {
+        add => _recognitionEvents.ObservationPublished += value;
+        remove => _recognitionEvents.ObservationPublished -= value;
+    }
 
     public static StartupMode DesiredMode { get; set; } = StartupMode.Talk;
     public static EmbeddingObjectMatcher Instance { get; private set; } // Singleton Instance
@@ -139,7 +147,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     // --- Private Variables ---
     private readonly Dictionary<string, RegisteredObject> _objectsById =
         new Dictionary<string, RegisteredObject>(StringComparer.Ordinal);
-    private string _lastRecognizedObjectId = "";
+    private readonly RecognitionEventPublisher _recognitionEvents = new RecognitionEventPublisher(
+        IsObjectRecognized == 1,
+        LastRecognizedObjectName);
     private Texture2D tempSnapshot;
     private int currentEyeId = -1;
     private int currentMouthId = -1;
@@ -544,46 +554,43 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         if (!change.IsRecognized)
         {
-            UpdateRecognitionState(false, "", "", 0f);
+            UpdateRecognitionState(false, "", "", 0f, false);
             return;
         }
 
         if (_objectsById.TryGetValue(change.ObjectId, out var registered))
         {
-            UpdateRecognitionState(true, change.ObjectId, registered.Name, change.Score);
+            UpdateRecognitionState(true, change.ObjectId, registered.Name, change.Score, false);
         }
     }
 
     /// <summary>
     /// 物体認識状態を更新し、変化があればイベントを発火します
     /// </summary>
-    private void UpdateRecognitionState(bool isRecognized, string objectId, string objectName, float confidence)
+    private void UpdateRecognitionState(
+        bool isRecognized,
+        string objectId,
+        string objectName,
+        float confidence,
+        bool publishObservation = true)
     {
         int newState = isRecognized ? 1 : 0;
         string newName = isRecognized ? objectName : "";
         string newObjectId = isRecognized ? objectId : "";
-        bool legacyStateChanged = IsObjectRecognized != newState || LastRecognizedObjectName != newName;
-        bool identityChanged = legacyStateChanged || _lastRecognizedObjectId != newObjectId;
-
-        // Conversation timing needs observations while the same object remains visible, not only
-        // identity transitions. The compatibility event below keeps its change-only semantics.
-        RecognitionChanged?.Invoke(new RecognizedObjectState(
-            newObjectId,
-            newName,
-            isRecognized,
-            confidence,
-            DateTimeOffset.UtcNow));
+        bool legacyStateChanged = publishObservation
+            ? _recognitionEvents.PublishObservation(
+                isRecognized,
+                newObjectId,
+                newName,
+                confidence,
+                DateTimeOffset.UtcNow)
+            : _recognitionEvents.PublishLegacyState(isRecognized, newName);
 
         // 状態が変化した場合のみ処理 (0->1, 1->0, or 1->"A" -> 1->"B")
-        if (identityChanged)
+        if (legacyStateChanged)
         {
             IsObjectRecognized = newState;
             LastRecognizedObjectName = newName;
-            _lastRecognizedObjectId = newObjectId;
-
-            if (legacyStateChanged)
-            {
-                OnRecognitionStateChanged?.Invoke(isRecognized, newName);
 
             if (resultText != null && DesiredMode == StartupMode.Talk)
             {
@@ -599,8 +606,6 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 Debug.Log($"★ 物体認識: OFF (0)");
             }
         }
-    }
-
     }
 
     #region Mode Switching
