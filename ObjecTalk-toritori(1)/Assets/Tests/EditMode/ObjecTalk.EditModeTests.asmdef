@@ -12,7 +12,8 @@
     "ObjecTalk.TestDoubles",
     "ObjecTalk.Infrastructure.AI.Embedding",
     "ObjecTalk.Domain.Conversation",
-    "ObjecTalk.Core.Conversation"
+    "ObjecTalk.Core.Conversation",
+    "ObjecTalk.Infrastructure.Conversation"
   ],
   "includePlatforms": [
     "Editor"
