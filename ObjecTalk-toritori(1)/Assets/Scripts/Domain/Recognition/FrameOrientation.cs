@@ -15,25 +15,29 @@ namespace ObjecTalk.Domain.Recognition
             Mirrored = mirrored;
         }
 
-        /// <summary>Clockwise rotation the source frame carries, always one of 0, 90, 180, 270.</summary>
+        /// <summary>
+        /// Clockwise rotation to apply to the raw frame so it looks upright, always one of
+        /// 0, 90, 180, 270 (this is <c>WebCamTexture.videoRotationAngle</c> normalized).
+        /// </summary>
         public int RotationDegrees { get; }
 
-        /// <summary>Whether the source frame is also flipped horizontally.</summary>
+        /// <summary>Whether the frame is also flipped horizontally (a front-facing camera).</summary>
         public bool Mirrored { get; }
 
         /// <summary>True when the frame is already upright and un-mirrored.</summary>
         public bool IsIdentity => RotationDegrees == 0 && !Mirrored;
 
         /// <summary>
-        /// Builds an orientation from <c>WebCamTexture.videoRotationAngle</c> /
-        /// <c>videoVerticallyMirrored</c>, snapping any integer angle (negative, &gt;360) to the
-        /// nearest quarter turn.
+        /// Builds an orientation from <c>WebCamTexture.videoRotationAngle</c> and whether the
+        /// active device is front-facing, snapping any integer angle (negative, &gt;360) to the
+        /// nearest quarter turn. Pass <c>WebCamDevice.isFrontFacing</c> for <paramref name="mirrorHorizontally"/>
+        /// (not <c>videoVerticallyMirrored</c>), matching the project's older Webcamera.cs.
         /// </summary>
-        public static FrameOrientation FromWebCam(int videoRotationAngle, bool videoVerticallyMirrored)
+        public static FrameOrientation FromWebCam(int videoRotationAngle, bool mirrorHorizontally)
         {
             var normalized = ((videoRotationAngle % 360) + 360) % 360;
             var quarter = (int)Math.Round(normalized / 90f, MidpointRounding.AwayFromZero) % 4;
-            return new FrameOrientation(quarter * 90, videoVerticallyMirrored);
+            return new FrameOrientation(quarter * 90, mirrorHorizontally);
         }
 
         /// <summary>
@@ -59,13 +63,16 @@ namespace ObjecTalk.Domain.Recognition
         /// <c>(u, v)</c> pairs so the domain assembly stays engine-free.
         /// </summary>
         /// <remarks>
-        /// The base corners are the unit square in BL, BR, TR, TL order. Undoing a clockwise
-        /// source rotation of <c>RotationDegrees</c> means rotating the sample points counter-
-        /// clockwise, i.e. reading the base list starting <c>shift</c> entries earlier, where
-        /// <c>shift = (4 - RotationDegrees / 90) % 4</c>. For identity that is <c>shift == 0</c>
-        /// (the unit square, unchanged); for 90 degrees <c>shift == 3</c>, which sends the
-        /// oriented bottom-left corner to the source's top-left <c>(0, 1)</c>. Mirroring then
-        /// reflects every sample's u about 0.5.
+        /// <c>WebCamTexture.videoRotationAngle</c> is the <em>clockwise</em> angle the raw frame
+        /// must be turned by to look upright (the same convention as the project's older
+        /// <c>Webcamera.cs</c>, which sets <c>localEulerAngles.z = -videoRotationAngle</c>). The
+        /// base corners are the unit square in BL, BR, TR, TL order; rotating the sampled
+        /// content clockwise by <c>RotationDegrees</c> means reading the base list
+        /// <c>shift = (RotationDegrees / 90) % 4</c> entries later. For identity that is
+        /// <c>shift == 0</c> (the unit square, unchanged); for 90 degrees <c>shift == 1</c>,
+        /// which sends the oriented bottom-left corner to the source's bottom-right
+        /// <c>(1, 0)</c>. Mirroring reflects the source's u about 0.5 first, so it composes the
+        /// same way as <c>Webcamera.cs</c>'s <c>localScale.x = -1</c> (scale before rotation).
         /// </remarks>
         public (float u, float v)[] SourceUVsForOrientedCorners()
         {
@@ -77,19 +84,19 @@ namespace ObjecTalk.Domain.Recognition
                 (u: 0f, v: 1f), // TL
             };
 
-            var shift = (4 - RotationDegrees / 90) % 4;
-            var rotated = new (float u, float v)[4];
-            for (var i = 0; i < 4; i++)
-            {
-                rotated[i] = uv[(i + shift) % 4];
-            }
-
             if (Mirrored)
             {
                 for (var i = 0; i < 4; i++)
                 {
-                    rotated[i] = (1f - rotated[i].u, rotated[i].v);
+                    uv[i] = (1f - uv[i].u, uv[i].v);
                 }
+            }
+
+            var shift = (RotationDegrees / 90) % 4;
+            var rotated = new (float u, float v)[4];
+            for (var i = 0; i < 4; i++)
+            {
+                rotated[i] = uv[(i + shift) % 4];
             }
 
             return rotated;

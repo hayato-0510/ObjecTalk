@@ -165,6 +165,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private FrameOrientation _frameOrientation;
     private int _orientedSourceWidth;
     private int _orientedSourceHeight;
+    // Front cameras are horizontally mirrored; back cameras are not. This tracks the active device
+    // so the oriented frame flips to match, the same rule as Webcamera.cs (localScale.x = -1 when
+    // device.isFrontFacing). WebCamTexture.videoVerticallyMirrored is a different signal and is not
+    // used here.
+    private bool _cameraIsFrontFacing;
     private bool _warnedNoBlitMaterial;
     // Set when the render texture cannot be created for the current camera size/orientation, so the
     // rebuild is not re-attempted (and re-logged) every frame; cleared when the source changes and
@@ -357,7 +362,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 yield break;
             }
 
-            webcamTexture = new WebCamTexture(WebCamTexture.devices[0].name, 1280, 720, 30);
+            var device = WebCamTexture.devices[0];
+            _cameraIsFrontFacing = device.isFrontFacing;
+            webcamTexture = new WebCamTexture(device.name, 1280, 720, 30);
         }
 
         // --- Load latest data from DB ---
@@ -506,11 +513,23 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         }
 
         var orientation = FrameOrientation.FromWebCam(
-            (int)webcamTexture.videoRotationAngle, webcamTexture.videoVerticallyMirrored);
+            (int)webcamTexture.videoRotationAngle, _cameraIsFrontFacing);
 
         var sourceUnchanged = _orientedSourceWidth == webcamTexture.width
             && _orientedSourceHeight == webcamTexture.height
             && _frameOrientation.Equals(orientation);
+
+        if (!sourceUnchanged)
+        {
+            // One line per orientation change: enough to diagnose an upside-down or mirrored
+            // preview on a device from logcat without a rebuild.
+            Debug.Log($"EmbeddingObjectMatcher camera frame: {webcamTexture.width}x{webcamTexture.height} "
+                + $"videoRotationAngle={webcamTexture.videoRotationAngle} "
+                + $"videoVerticallyMirrored={webcamTexture.videoVerticallyMirrored} "
+                + $"isFrontFacing={_cameraIsFrontFacing} -> {orientation} | "
+                + $"graphicsUVStartsAtTop={SystemInfo.graphicsUVStartsAtTop} "
+                + $"device={SystemInfo.graphicsDeviceType}");
+        }
 
         // Nothing to do while the source is unchanged and we already have a frame (or have already
         // given up on this source). Re-attempting a failed Create() every frame would leak GPU

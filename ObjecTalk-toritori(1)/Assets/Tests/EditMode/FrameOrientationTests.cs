@@ -46,11 +46,34 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
-        public void Rotate90_MapsTheOrientedBottomLeftToTheSourceTopLeft()
+        public void Rotate90_RotatesTheContentClockwiseToUpright()
         {
-            // A 90 degree device rotation: the upright image's bottom-left corner
-            // samples the source's top-left.
+            // WebCamTexture.videoRotationAngle is the clockwise angle the raw frame must be
+            // rotated by to look upright (matches Webcamera.cs: localEulerAngles.z = -angle).
+            // For 90 degrees, the oriented bottom-left corner samples the source's bottom-right.
             var uvs = FrameOrientation.FromWebCam(90, false).SourceUVsForOrientedCorners();
+
+            Assert.That(uvs[0], Is.EqualTo((1f, 0f)));  // oriented BL  <- source BR
+            Assert.That(uvs[1], Is.EqualTo((1f, 1f)));  // oriented BR  <- source TR
+            Assert.That(uvs[2], Is.EqualTo((0f, 1f)));  // oriented TR  <- source TL
+            Assert.That(uvs[3], Is.EqualTo((0f, 0f)));  // oriented TL  <- source BL
+        }
+
+        [Test]
+        public void Rotate180_TurnsTheContentHalfway()
+        {
+            var uvs = FrameOrientation.FromWebCam(180, false).SourceUVsForOrientedCorners();
+
+            Assert.That(uvs[0], Is.EqualTo((1f, 1f)));  // oriented BL  <- source TR
+            Assert.That(uvs[1], Is.EqualTo((0f, 1f)));  // oriented BR  <- source TL
+            Assert.That(uvs[2], Is.EqualTo((0f, 0f)));  // oriented TR  <- source BL
+            Assert.That(uvs[3], Is.EqualTo((1f, 0f)));  // oriented TL  <- source BR
+        }
+
+        [Test]
+        public void Rotate270_RotatesTheContentThreeQuarterTurnsClockwise()
+        {
+            var uvs = FrameOrientation.FromWebCam(270, false).SourceUVsForOrientedCorners();
 
             Assert.That(uvs[0], Is.EqualTo((0f, 1f)));  // oriented BL  <- source TL
             Assert.That(uvs[1], Is.EqualTo((0f, 0f)));  // oriented BR  <- source BL
@@ -59,13 +82,26 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
-        public void Mirrored_FlipsTheCornerUVsHorizontally()
+        public void Mirrored_FlipsHorizontallyInSourceSpaceBeforeRotation()
         {
             var plain = FrameOrientation.FromWebCam(0, false).SourceUVsForOrientedCorners();
             var mirrored = FrameOrientation.FromWebCam(0, true).SourceUVsForOrientedCorners();
 
             Assert.That(mirrored[0].u, Is.EqualTo(1f - plain[0].u));
             Assert.That(mirrored[1].u, Is.EqualTo(1f - plain[1].u));
+        }
+
+        [Test]
+        public void MirroredWithRotation_MirrorsSourceUThenRotates()
+        {
+            // Mirror is applied to the source UVs first, then the rotation shift, matching
+            // Webcamera.cs where localScale.x = -1 composes before localEulerAngles.
+            var uvs = FrameOrientation.FromWebCam(90, true).SourceUVsForOrientedCorners();
+
+            Assert.That(uvs[0], Is.EqualTo((0f, 0f)));  // (1,0) mirrored to (0,0), then rotate
+            Assert.That(uvs[1], Is.EqualTo((0f, 1f)));
+            Assert.That(uvs[2], Is.EqualTo((1f, 1f)));
+            Assert.That(uvs[3], Is.EqualTo((1f, 0f)));
         }
     }
 }
