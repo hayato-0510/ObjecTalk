@@ -221,6 +221,7 @@ namespace ObjecTalk.Presentation.Talk
             finally
             {
                 view?.ShowState(ConversationState.Idle);
+                Interlocked.Exchange(ref stopRequested, 0);
             }
         }
 

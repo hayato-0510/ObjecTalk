@@ -213,6 +213,30 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
             UnityEngine.Object.Destroy(fixture.Root);
         }
 
+        [UnityTest]
+        public IEnumerator TalkController_CanStopAgainAfterConversationRestarts()
+        {
+            var fixture = CreateTalkFixture();
+            fixture.Root.SetActive(true);
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+
+            fixture.Root.SendMessage("OnApplicationPause", true);
+            yield return WaitUntil(() => fixture.Voice.StopReasons.Count == 1);
+
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 2);
+            fixture.Root.SendMessage("OnApplicationPause", true);
+            yield return WaitUntil(() => fixture.Voice.StopReasons.Count == 2);
+
+            Assert.That(fixture.Voice.StopReasons, Is.EqualTo(new[]
+            {
+                ConversationStopReason.ApplicationPaused,
+                ConversationStopReason.ApplicationPaused
+            }));
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
         private static TalkFixture CreateTalkFixture()
         {
             var root = new GameObject("TalkConversationRoot");
