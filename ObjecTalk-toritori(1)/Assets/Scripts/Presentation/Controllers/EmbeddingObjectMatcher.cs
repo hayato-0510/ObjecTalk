@@ -109,9 +109,33 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     [Tooltip("プレビュー上のガイド枠の大きさ（短辺に対する割合）。ImageGeometry.DefaultCropFraction に合わせる。")]
     public float guideFractionOfPreview = ImageGeometry.DefaultCropFraction;
 
+    [Tooltip("登録プレビューで枠の外側を覆う不透明マスクの4ストリップ（上・下・左・右）。中央のガイド枠と一緒に表示／サイズ調整される。")]
+    public RectTransform maskEdgeTop;
+    public RectTransform maskEdgeBottom;
+    public RectTransform maskEdgeLeft;
+    public RectTransform maskEdgeRight;
+
+    [Tooltip("配置画面でスナップショットに重ねる装飾用の切り出し枠。raycastTarget は切っておく（ドラッグを妨げないため）。")]
+    public RectTransform placementGuideFrame;
+
+    [Tooltip("撮影が受理された瞬間に一瞬光る全画面の白オーバーレイ。Canvas 直下・raycastTarget off・初期 alpha 0。")]
+    public Image captureFlashOverlay;
+
+    [Range(0.05f, 0.5f)]
+    [Tooltip("撮影フラッシュのフェード時間（秒）。")]
+    public float captureFlashDuration = 0.15f;
+
     [Header("Recognition Mode UI (TalkCameraPanel)")]
     public Image recognitionEyeImage;
     public Image recognitionMouthImage;
+
+    [Range(0.05f, 0.5f)]
+    [Tooltip("認識中の目オーバーレイの大きさ（プレビュー短辺に対する割合）。")]
+    public float overlayEyeFraction = 0.18f;
+
+    [Range(0.05f, 0.5f)]
+    [Tooltip("認識中の口オーバーレイの大きさ（プレビュー短辺に対する割合）。")]
+    public float overlayMouthFraction = 0.22f;
 
     [Header("Style Selection UI")]
     public ScrollRect styleScrollViewRect;
@@ -182,6 +206,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     // Pending one-frame guide re-size; see RefreshGuideFrameSizeDeferred.
     private Coroutine _guideResizeRoutine;
+
+    // Running capture-flash fade; see FlashCapture.
+    private Coroutine _flashRoutine;
 
     /// <summary>Leaves the camera flow: stops the camera and loads the home scene.</summary>
     public void ReturnToHome()
@@ -401,8 +428,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
             currentMode = AppMode.Recognition;
             if (resultText != null && _recognitionAvailable) resultText.text = RecognitionMessages.Searching;
-            if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
-            if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
+            HideFaceOverlay();
         }
         else // DesiredMode == StartupMode.Register
         {
@@ -443,8 +469,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         // Pause abandons the run in flight and hands the GPU buffers back.
         _recognitionService?.Pause();
-        UpdateRecognitionState(false, "");
+        UpdateRecognitionState(false, null);
         SetGuideFrameActive(false);
+        SetPlacementGuideActive(false);
     }
 
     /// <summary>Releases camera and inference work while the application is backgrounded.</summary>
@@ -454,7 +481,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             if (webcamTexture != null && webcamTexture.isPlaying) webcamTexture.Stop();
             _recognitionService?.Pause();
-            UpdateRecognitionState(false, "");
+            UpdateRecognitionState(false, null);
             return;
         }
 
@@ -747,15 +774,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             case RecognitionTickStatus.Recognized:
                 if (_objectsById.TryGetValue(result.ObjectId, out var recognized))
                 {
-                    UpdateRecognitionState(true, recognized.Name);
+                    UpdateRecognitionState(true, recognized);
                 }
                 break;
 
             case RecognitionTickStatus.NotRecognized:
-                UpdateRecognitionState(false, "");
+                UpdateRecognitionState(false, null);
                 break;
 
             case RecognitionTickStatus.CaptureAccepted:
+                FlashCapture();
                 SetRegistrationProgress(result.CapturedViewCount);
                 if (result.CapturedViewCount >= RecognitionSettings.RequiredSamplesPerObject)
                 {
@@ -831,23 +859,24 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         if (!change.IsRecognized)
         {
-            UpdateRecognitionState(false, "");
+            UpdateRecognitionState(false, null);
             return;
         }
 
         if (_objectsById.TryGetValue(change.ObjectId, out var registered))
         {
-            UpdateRecognitionState(true, registered.Name);
+            UpdateRecognitionState(true, registered);
         }
     }
 
     /// <summary>
-    /// 物体認識状態を更新し、変化があればイベントを発火します
+    /// 物体認識状態を更新し、変化があればイベントを発火します。認識中は登録済みの目・口を
+    /// Talk プレビューに重ねます（<paramref name="recognized"/> が null なら非表示）。
     /// </summary>
-    private void UpdateRecognitionState(bool isRecognized, string objectName)
+    private void UpdateRecognitionState(bool isRecognized, RegisteredObject recognized)
     {
         int newState = isRecognized ? 1 : 0;
-        string newName = isRecognized ? objectName : "";
+        string newName = isRecognized ? (recognized != null ? recognized.Name : "") : "";
 
         // 状態が変化した場合のみ処理 (0->1, 1->0, or 1->"A" -> 1->"B")
         if (IsObjectRecognized != newState || LastRecognizedObjectName != newName)
@@ -862,15 +891,77 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 resultText.text = isRecognized ? newName : RecognitionMessages.Searching;
             }
 
-            if (isRecognized)
+            if (isRecognized && recognized != null)
             {
-                Debug.Log($"★ 物体認識: ON (1) - 物体名: {objectName}");
+                ShowFaceOverlay(recognized);
+                Debug.Log($"★ 物体認識: ON (1) - 物体名: {newName}");
             }
             else
             {
+                HideFaceOverlay();
                 Debug.Log($"★ 物体認識: OFF (0)");
             }
         }
+    }
+
+    /// <summary>
+    /// Places the registered eye / mouth sprites over the recognition preview at their stored
+    /// relative positions. There is no bounding-box tracking, so the pieces sit at a fixed spot on
+    /// the preview — correct as long as the object fills the guide square it was captured in.
+    /// </summary>
+    private void ShowFaceOverlay(RegisteredObject obj)
+    {
+        if (DesiredMode != StartupMode.Talk || talkCameraDisplay == null)
+        {
+            HideFaceOverlay();
+            return;
+        }
+
+        var previewRect = talkCameraDisplay.rectTransform.rect;
+        PlaceOverlayPiece(recognitionEyeImage, eyeStyles, obj.EyeStyleId,
+            obj.RelativeEyePosition, overlayEyeFraction, previewRect);
+        PlaceOverlayPiece(recognitionMouthImage, mouthStyles, obj.MouthStyleId,
+            obj.RelativeMouthPosition, overlayMouthFraction, previewRect);
+    }
+
+    private static void PlaceOverlayPiece(Image image, List<Sprite> styles, int styleId,
+        Vector2 relative, float fraction, Rect previewRect)
+    {
+        if (image == null)
+        {
+            return;
+        }
+
+        bool placeable = styleId >= 0 && styles != null && styleId < styles.Count
+                         && styles[styleId] != null
+                         && relative.x >= 0f && relative.y >= 0f
+                         && previewRect.width > 0f && previewRect.height > 0f;
+        if (!placeable)
+        {
+            image.gameObject.SetActive(false);
+            return;
+        }
+
+        image.sprite = styles[styleId];
+
+        var (x, y) = FaceOverlayLayout.AnchoredPosition(
+            relative.x, relative.y, previewRect.width, previewRect.height);
+
+        var rt = image.rectTransform;
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(x, y);
+
+        float side = Mathf.Min(previewRect.width, previewRect.height) * fraction;
+        rt.sizeDelta = new Vector2(side, side);
+
+        image.gameObject.SetActive(true);
+    }
+
+    private void HideFaceOverlay()
+    {
+        if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
+        if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
     }
 
     #region Mode Switching
@@ -885,6 +976,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         if (namingPanel != null) namingPanel.SetActive(true);
         if (placementPanel != null) placementPanel.SetActive(false);
+        SetPlacementGuideActive(false);
 
         if (nameInputField != null) nameInputField.text = "";
         if (categoryInputField != null) categoryInputField.text = "";
@@ -908,6 +1000,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // Reset IDs
         currentEyeId = -1;
         currentMouthId = -1;
+        SetPlacementGuideActive(true);
         Debug.Log("Switched to Placement Mode.");
     }
     #endregion
@@ -1136,6 +1229,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             currentMode = AppMode.Placement;
             if (namingPanel != null) namingPanel.SetActive(false);
             if (placementPanel != null) placementPanel.SetActive(true);
+            SetPlacementGuideActive(true);
             // Re-populate styles
             if (eyeToggle != null && mouthToggle != null)
             {
@@ -1149,6 +1243,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.Log("Back button pressed on Placement panel. Returning to register camera.");
             currentMode = AppMode.Recognition;
             if (placementPanel != null) placementPanel.SetActive(false);
+            SetPlacementGuideActive(false);
 
             if (registerCameraPanel != null) registerCameraPanel.SetActive(true);
             if (talkCameraPanel != null) talkCameraPanel.SetActive(false);
@@ -1490,6 +1585,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         }
 
         captureGuideFrame.gameObject.SetActive(active);
+        SetRegistrationMaskActive(active);
         if (!active)
         {
             return;
@@ -1536,7 +1632,110 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             var side = RegistrationGuideLayout.FrameSize(previewSize.x, previewSize.y, guideFractionOfPreview);
             captureGuideFrame.sizeDelta = new Vector2(side, side);
             captureGuideFrame.anchoredPosition = Vector2.zero;
+            RefreshRegistrationMask(previewSize.x, previewSize.y, side);
         }
+    }
+
+    /// <summary>Shows or hides the four opaque strips that box in the capture square.</summary>
+    private void SetRegistrationMaskActive(bool active)
+    {
+        if (maskEdgeTop != null) maskEdgeTop.gameObject.SetActive(active);
+        if (maskEdgeBottom != null) maskEdgeBottom.gameObject.SetActive(active);
+        if (maskEdgeLeft != null) maskEdgeLeft.gameObject.SetActive(active);
+        if (maskEdgeRight != null) maskEdgeRight.gameObject.SetActive(active);
+    }
+
+    /// <summary>Lays the four mask strips around a centred <paramref name="holeSide"/> square.</summary>
+    private void RefreshRegistrationMask(float previewWidth, float previewHeight, float holeSide)
+    {
+        if (maskEdgeTop == null && maskEdgeBottom == null && maskEdgeLeft == null && maskEdgeRight == null)
+        {
+            return;
+        }
+
+        var edges = RegistrationMaskLayout.EdgeRects(previewWidth, previewHeight, holeSide);
+        ApplyMaskStrip(maskEdgeTop, edges.Top);
+        ApplyMaskStrip(maskEdgeBottom, edges.Bottom);
+        ApplyMaskStrip(maskEdgeLeft, edges.Left);
+        ApplyMaskStrip(maskEdgeRight, edges.Right);
+    }
+
+    private static void ApplyMaskStrip(RectTransform strip, RegistrationMaskLayout.Strip layout)
+    {
+        if (strip == null)
+        {
+            return;
+        }
+
+        strip.anchorMin = strip.anchorMax = strip.pivot = new Vector2(0.5f, 0.5f);
+        strip.sizeDelta = new Vector2(layout.Width, layout.Height);
+        strip.anchoredPosition = new Vector2(layout.CenterX, layout.CenterY);
+    }
+
+    /// <summary>
+    /// Shows the decorative crop frame over the placement snapshot so the user sees which part of
+    /// the photo the recognition actually keeps while positioning the eyes and mouth.
+    /// </summary>
+    private void SetPlacementGuideActive(bool active)
+    {
+        if (placementGuideFrame == null)
+        {
+            return;
+        }
+
+        placementGuideFrame.gameObject.SetActive(active);
+        if (!active)
+        {
+            return;
+        }
+
+        Canvas.ForceUpdateCanvases();
+        var parent = placementGuideFrame.parent as RectTransform;
+        var size = parent != null ? parent.rect.size : placementGuideFrame.rect.size;
+        if (size.x > 0f && size.y > 0f)
+        {
+            var side = RegistrationGuideLayout.FrameSize(size.x, size.y, guideFractionOfPreview);
+            placementGuideFrame.sizeDelta = new Vector2(side, side);
+            placementGuideFrame.anchoredPosition = Vector2.zero;
+        }
+    }
+
+    /// <summary>Flashes the full-screen white overlay once so a capture is unmistakable.</summary>
+    private void FlashCapture()
+    {
+        if (captureFlashOverlay == null)
+        {
+            return;
+        }
+
+        if (_flashRoutine != null)
+        {
+            StopCoroutine(_flashRoutine);
+        }
+
+        _flashRoutine = StartCoroutine(FlashCaptureRoutine());
+    }
+
+    private IEnumerator FlashCaptureRoutine()
+    {
+        var image = captureFlashOverlay;
+        image.gameObject.SetActive(true);
+
+        var colour = image.color;
+        var elapsed = 0f;
+        var duration = Mathf.Max(0.01f, captureFlashDuration);
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            colour.a = Mathf.Lerp(1f, 0f, elapsed / duration);
+            image.color = colour;
+            yield return null;
+        }
+
+        colour.a = 0f;
+        image.color = colour;
+        image.gameObject.SetActive(false);
+        _flashRoutine = null;
     }
 
     private void ShowRecognitionUnavailable(string message)
