@@ -99,24 +99,22 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     [Tooltip("撮影進捗のドット3個。左から撮影済みを点灯する。")]
     public Image[] registrationDots;
 
-    [Tooltip("プレビュー上のキャプチャ範囲ガイド枠。実際に embedding に渡る中央ボックスと一致させる。")]
-    public RectTransform captureGuideFrame;
-
     [Tooltip("撮影の狙いを説明するテキスト。")]
     public TMP_Text registrationInstructionText;
 
     [Range(0.3f, 1f)]
-    [Tooltip("プレビュー上のガイド枠の大きさ（短辺に対する割合）。ImageGeometry.DefaultCropFraction に合わせる。")]
+    [Tooltip("中央クロップの唯一の基準値（短辺に対する割合）。embedding が実際に切り出す箱と、各カメラ面の" +
+             "ガイド枠／緑マスクの両方をこの値が駆動する。ImageGeometry.DefaultCropFraction に合わせる。")]
     public float guideFractionOfPreview = ImageGeometry.DefaultCropFraction;
 
-    [Tooltip("登録プレビューで枠の外側を覆う不透明マスクの4ストリップ（上・下・左・右）。中央のガイド枠と一緒に表示／サイズ調整される。")]
-    public RectTransform maskEdgeTop;
-    public RectTransform maskEdgeBottom;
-    public RectTransform maskEdgeLeft;
-    public RectTransform maskEdgeRight;
+    [Tooltip("登録カメラプレビューの切り出しガイド（枠＋緑マスク）。CameraDisplay(reg) の子。")]
+    public CropGuideOverlay cropOverlayRegister;
 
-    [Tooltip("配置画面でスナップショットに重ねる装飾用の切り出し枠。raycastTarget は切っておく（ドラッグを妨げないため）。")]
-    public RectTransform placementGuideFrame;
+    [Tooltip("配置スナップショットの切り出しガイド（枠＋緑マスク）。SnapshotDisplay の子。")]
+    public CropGuideOverlay cropOverlayPlacement;
+
+    [Tooltip("Talk カメラプレビューの切り出しガイド（枠＋緑マスク）。CameraDisplay(talk) の子。")]
+    public CropGuideOverlay cropOverlayTalk;
 
     [Tooltip("撮影が受理された瞬間に一瞬光る全画面の白オーバーレイ。Canvas 直下・raycastTarget off・初期 alpha 0。")]
     public Image captureFlashOverlay;
@@ -203,9 +201,6 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     // One-shot so an unwired registration readout does not log on every capture.
     private bool _warnedNoStatusText;
-
-    // Pending one-frame guide re-size; see RefreshGuideFrameSizeDeferred.
-    private Coroutine _guideResizeRoutine;
 
     // Running capture-flash fade; see FlashCapture.
     private Coroutine _flashRoutine;
@@ -429,6 +424,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             currentMode = AppMode.Recognition;
             if (resultText != null && _recognitionAvailable) resultText.text = RecognitionMessages.Searching;
             HideFaceOverlay();
+            ShowOverlay(cropOverlayTalk);
         }
         else // DesiredMode == StartupMode.Register
         {
@@ -470,8 +466,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // Pause abandons the run in flight and hands the GPU buffers back.
         _recognitionService?.Pause();
         UpdateRecognitionState(false, null);
-        SetGuideFrameActive(false);
-        SetPlacementGuideActive(false);
+        HideAllOverlays();
     }
 
     /// <summary>Releases camera and inference work while the application is backgrounded.</summary>
@@ -718,12 +713,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             fitter.aspectRatio = _orientedFrame.width / (float)_orientedFrame.height;
 
-            // The fitter has just resized the preview, so the guide square taken against the
+            // The fitter has just resized the preview, so a guide square fitted against the
             // pre-layout rect at panel activation is now stale.
-            if (captureGuideFrame != null && captureGuideFrame.gameObject.activeSelf)
-            {
-                RefreshGuideFrameSize();
-            }
+            var overlay = display == registerCameraDisplay ? cropOverlayRegister
+                : display == talkCameraDisplay ? cropOverlayTalk
+                : null;
+            overlay?.Refresh();
         }
     }
 
@@ -973,10 +968,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         var sprite = Sprite.Create(tempSnapshot, new UnityEngine.Rect(0, 0, tempSnapshot.width, tempSnapshot.height), new Vector2(0.5f, 0.5f));
         if (snapshotDisplay_Naming != null) snapshotDisplay_Naming.sprite = sprite;
         else Debug.LogError("SnapshotDisplay_Naming is not assigned!");
+        FitSnapshotAspect(snapshotDisplay_Naming, tempSnapshot);
 
         if (namingPanel != null) namingPanel.SetActive(true);
         if (placementPanel != null) placementPanel.SetActive(false);
-        SetPlacementGuideActive(false);
+        cropOverlayPlacement?.Hide();
 
         if (nameInputField != null) nameInputField.text = "";
         if (categoryInputField != null) categoryInputField.text = "";
@@ -989,6 +985,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // Explicitly use UnityEngine.Rect
         if (snapshotDisplay_Placement != null) snapshotDisplay_Placement.sprite = Sprite.Create(snapshot, new UnityEngine.Rect(0, 0, snapshot.width, snapshot.height), new Vector2(0.5f, 0.5f));
         else Debug.LogError("SnapshotDisplay_Placement is not assigned!");
+        FitSnapshotAspect(snapshotDisplay_Placement, snapshot);
 
         if (mouthToggle != null) mouthToggle.isOn = false;
         if (eyeToggle != null) eyeToggle.isOn = true; // Default to eye styles
@@ -1000,7 +997,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // Reset IDs
         currentEyeId = -1;
         currentMouthId = -1;
-        SetPlacementGuideActive(true);
+        ShowOverlay(cropOverlayPlacement);
         Debug.Log("Switched to Placement Mode.");
     }
     #endregion
@@ -1044,7 +1041,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         _recognitionService.BeginRegistration(_registrationObjectId);
         DestroySnapshot();
         SetRegistrationProgress(0);
-        SetGuideFrameActive(true);
+        ShowOverlay(cropOverlayRegister);
         SetRegisterButtonInteractable(true);
     }
 
@@ -1131,7 +1128,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private void EnterPlacementFromCaptures()
     {
         SetRegisterButtonInteractable(true);
-        SetGuideFrameActive(false);
+        cropOverlayRegister?.Hide();
         if (tempSnapshot == null)
         {
             Debug.LogError("Three views were captured but no snapshot was kept.");
@@ -1199,7 +1196,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.Log("Back button pressed on Recognition panel. Returning to selection panel.");
 
             CancelRegistrationSession();
-            SetGuideFrameActive(false);
+            HideAllOverlays();
 
             // 1. モード選択パネルを表示する
             if (talkSelectionPanel != null)
@@ -1229,7 +1226,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             currentMode = AppMode.Placement;
             if (namingPanel != null) namingPanel.SetActive(false);
             if (placementPanel != null) placementPanel.SetActive(true);
-            SetPlacementGuideActive(true);
+            ShowOverlay(cropOverlayPlacement);
             // Re-populate styles
             if (eyeToggle != null && mouthToggle != null)
             {
@@ -1243,7 +1240,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.Log("Back button pressed on Placement panel. Returning to register camera.");
             currentMode = AppMode.Recognition;
             if (placementPanel != null) placementPanel.SetActive(false);
-            SetPlacementGuideActive(false);
+            cropOverlayPlacement?.Hide();
 
             if (registerCameraPanel != null) registerCameraPanel.SetActive(true);
             if (talkCameraPanel != null) talkCameraPanel.SetActive(false);
@@ -1563,140 +1560,43 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     }
 
     /// <summary>
-    /// Shows or hides the on-preview crop-guide frame. When shown it is sized immediately and again
-    /// on the next frame: the panel is normally activated on the same frame this runs, so the
-    /// preview RectTransform still holds its pre-layout size here.
+    /// Shows one crop-guide overlay, first syncing its fraction to <see cref="guideFractionOfPreview"/>
+    /// so the frame and green surround always match the box the embedding actually keeps.
     /// </summary>
-    private void SetGuideFrameActive(bool active)
+    private void ShowOverlay(CropGuideOverlay overlay)
     {
-        if (captureGuideFrame == null)
-        {
-            if (active)
-            {
-                Debug.LogWarning("captureGuideFrame is not set; the crop guide will not be shown.");
-            }
-            return;
-        }
-
-        if (_guideResizeRoutine != null)
-        {
-            StopCoroutine(_guideResizeRoutine);
-            _guideResizeRoutine = null;
-        }
-
-        captureGuideFrame.gameObject.SetActive(active);
-        SetRegistrationMaskActive(active);
-        if (!active)
+        if (overlay == null)
         {
             return;
         }
 
-        RefreshGuideFrameSize();
-        if (isActiveAndEnabled)
-        {
-            _guideResizeRoutine = StartCoroutine(RefreshGuideFrameSizeDeferred());
-        }
+        overlay.fraction = guideFractionOfPreview;
+        overlay.Show();
+    }
+
+    private void HideAllOverlays()
+    {
+        cropOverlayRegister?.Hide();
+        cropOverlayPlacement?.Hide();
+        cropOverlayTalk?.Hide();
     }
 
     /// <summary>
-    /// Re-sizes the guide one frame later, once the panel activation has produced a layout pass.
-    /// <see cref="RefreshGuideFrameSize"/> is also called from <see cref="ApplyCameraDisplay"/>,
-    /// which covers the later frame where the AspectRatioFitter finally learns the aspect ratio.
+    /// Keeps a snapshot Image from stretching by feeding its <see cref="AspectRatioFitter"/> the
+    /// captured texture's aspect. Also keeps the placement eye/mouth position maths honest, since
+    /// those read the snapshot rect.
     /// </summary>
-    private IEnumerator RefreshGuideFrameSizeDeferred()
+    private static void FitSnapshotAspect(Graphic display, Texture2D texture)
     {
-        yield return null;
-        RefreshGuideFrameSize();
-        _guideResizeRoutine = null;
-    }
-
-    /// <summary>
-    /// Sizes the guide to the square the embedding actually keeps
-    /// (<see cref="guideFractionOfPreview"/> of the preview's short side). The canvas is flushed
-    /// first so the preview's rect reflects any pending layout or AspectRatioFitter rebuild; this
-    /// runs only on panel activation and camera-frame rebuilds, never per frame.
-    /// </summary>
-    private void RefreshGuideFrameSize()
-    {
-        if (captureGuideFrame == null || !captureGuideFrame.gameObject.activeSelf)
+        if (display == null || texture == null || texture.height == 0)
         {
             return;
         }
 
-        Canvas.ForceUpdateCanvases();
-
-        var parent = captureGuideFrame.parent as RectTransform;
-        var previewSize = parent != null ? parent.rect.size : captureGuideFrame.rect.size;
-        if (previewSize.x > 0f && previewSize.y > 0f)
+        var fitter = display.GetComponent<AspectRatioFitter>();
+        if (fitter != null)
         {
-            var side = RegistrationGuideLayout.FrameSize(previewSize.x, previewSize.y, guideFractionOfPreview);
-            captureGuideFrame.sizeDelta = new Vector2(side, side);
-            captureGuideFrame.anchoredPosition = Vector2.zero;
-            RefreshRegistrationMask(previewSize.x, previewSize.y, side);
-        }
-    }
-
-    /// <summary>Shows or hides the four opaque strips that box in the capture square.</summary>
-    private void SetRegistrationMaskActive(bool active)
-    {
-        if (maskEdgeTop != null) maskEdgeTop.gameObject.SetActive(active);
-        if (maskEdgeBottom != null) maskEdgeBottom.gameObject.SetActive(active);
-        if (maskEdgeLeft != null) maskEdgeLeft.gameObject.SetActive(active);
-        if (maskEdgeRight != null) maskEdgeRight.gameObject.SetActive(active);
-    }
-
-    /// <summary>Lays the four mask strips around a centred <paramref name="holeSide"/> square.</summary>
-    private void RefreshRegistrationMask(float previewWidth, float previewHeight, float holeSide)
-    {
-        if (maskEdgeTop == null && maskEdgeBottom == null && maskEdgeLeft == null && maskEdgeRight == null)
-        {
-            return;
-        }
-
-        var edges = RegistrationMaskLayout.EdgeRects(previewWidth, previewHeight, holeSide);
-        ApplyMaskStrip(maskEdgeTop, edges.Top);
-        ApplyMaskStrip(maskEdgeBottom, edges.Bottom);
-        ApplyMaskStrip(maskEdgeLeft, edges.Left);
-        ApplyMaskStrip(maskEdgeRight, edges.Right);
-    }
-
-    private static void ApplyMaskStrip(RectTransform strip, RegistrationMaskLayout.Strip layout)
-    {
-        if (strip == null)
-        {
-            return;
-        }
-
-        strip.anchorMin = strip.anchorMax = strip.pivot = new Vector2(0.5f, 0.5f);
-        strip.sizeDelta = new Vector2(layout.Width, layout.Height);
-        strip.anchoredPosition = new Vector2(layout.CenterX, layout.CenterY);
-    }
-
-    /// <summary>
-    /// Shows the decorative crop frame over the placement snapshot so the user sees which part of
-    /// the photo the recognition actually keeps while positioning the eyes and mouth.
-    /// </summary>
-    private void SetPlacementGuideActive(bool active)
-    {
-        if (placementGuideFrame == null)
-        {
-            return;
-        }
-
-        placementGuideFrame.gameObject.SetActive(active);
-        if (!active)
-        {
-            return;
-        }
-
-        Canvas.ForceUpdateCanvases();
-        var parent = placementGuideFrame.parent as RectTransform;
-        var size = parent != null ? parent.rect.size : placementGuideFrame.rect.size;
-        if (size.x > 0f && size.y > 0f)
-        {
-            var side = RegistrationGuideLayout.FrameSize(size.x, size.y, guideFractionOfPreview);
-            placementGuideFrame.sizeDelta = new Vector2(side, side);
-            placementGuideFrame.anchoredPosition = Vector2.zero;
+            fitter.aspectRatio = texture.width / (float)texture.height;
         }
     }
 
