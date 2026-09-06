@@ -111,7 +111,7 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
-        public void ExchangeSdpAsync_CallerCancellation_InterruptsUncooperativeHttpClient()
+        public async Task ExchangeSdpAsync_CallerCancellation_InterruptsUncooperativeHttpClient()
         {
             using (var cancellation = new CancellationTokenSource())
             {
@@ -128,12 +128,12 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 Assert.That(started.Task.Wait(100), Is.True);
                 cancellation.Cancel();
 
-                Assert.ThrowsAsync<OperationCanceledException>(async () => await exchange);
+                await CaptureExceptionAsync<OperationCanceledException>(() => exchange);
             }
         }
 
         [Test, Timeout(1000)]
-        public void ExchangeSdpAsync_UncooperativeTokenProvider_UsesConfiguredTimeout()
+        public async Task ExchangeSdpAsync_UncooperativeTokenProvider_UsesConfiguredTimeout()
         {
             var neverCompletes = new TaskCompletionSource<string>();
             var client = new RealtimeCallClient(
@@ -142,13 +142,14 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 new FakeHttpClient(new RealtimeHttpResponse(200, "application/sdp", "answer")),
                 TimeSpan.FromMilliseconds(25));
 
-            RealtimeCallException exception = Assert.ThrowsAsync<RealtimeCallException>(async () => await client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
+            RealtimeCallException exception = await CaptureExceptionAsync<RealtimeCallException>(
+                () => client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
 
             Assert.That(exception.Kind, Is.EqualTo(RealtimeCallFailureKind.Timeout));
         }
 
         [Test, Timeout(1000)]
-        public void ExchangeSdpAsync_UncooperativeHttpClient_UsesConfiguredTimeout()
+        public async Task ExchangeSdpAsync_UncooperativeHttpClient_UsesConfiguredTimeout()
         {
             var neverCompletes = new TaskCompletionSource<RealtimeHttpResponse>();
             var client = new RealtimeCallClient(
@@ -157,7 +158,8 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 new FakeHttpClient((request, token) => neverCompletes.Task),
                 TimeSpan.FromMilliseconds(25));
 
-            RealtimeCallException exception = Assert.ThrowsAsync<RealtimeCallException>(async () => await client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
+            RealtimeCallException exception = await CaptureExceptionAsync<RealtimeCallException>(
+                () => client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
 
             Assert.That(exception.Kind, Is.EqualTo(RealtimeCallFailureKind.Timeout));
         }
@@ -177,10 +179,26 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             });
             var client = new RealtimeCallClient("https://backend.example", new FakeTokenProvider("firebase-token"), httpClient);
 
-            RealtimeCallException exception = Assert.ThrowsAsync<RealtimeCallException>(async () => await client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
+            RealtimeCallException exception = await CaptureExceptionAsync<RealtimeCallException>(
+                () => client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None));
 
             Assert.That(exception.Kind, Is.EqualTo(RealtimeCallFailureKind.Timeout));
             Assert.That(await Task.WhenAny(cancellationObserved.Task, Task.Delay(100)), Is.SameAs(cancellationObserved.Task));
+        }
+
+        private static async Task<TException> CaptureExceptionAsync<TException>(Func<Task> action)
+            where TException : Exception
+        {
+            try
+            {
+                await action();
+            }
+            catch (TException exception)
+            {
+                return exception;
+            }
+
+            throw new AssertionException($"Expected an exception of type {typeof(TException).FullName}.");
         }
 
         private sealed class FakeTokenProvider : IIdTokenProvider

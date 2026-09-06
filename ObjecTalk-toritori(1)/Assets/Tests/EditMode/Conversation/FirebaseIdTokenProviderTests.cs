@@ -45,7 +45,7 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test, Timeout(1000)]
-        public void GetAsync_CallerCancellation_InterruptsUncooperativeTokenSource()
+        public async Task GetAsync_CallerCancellation_InterruptsUncooperativeTokenSource()
         {
             var neverCompletes = new TaskCompletionSource<string>();
             var provider = new FirebaseIdTokenProvider(new FakeTokenSource(neverCompletes.Task));
@@ -54,8 +54,23 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 Task<string> request = provider.GetAsync(false, cancellation.Token);
                 cancellation.Cancel();
 
-                Assert.ThrowsAsync<OperationCanceledException>(async () => await request);
+                await CaptureExceptionAsync<OperationCanceledException>(() => request);
             }
+        }
+
+        private static async Task<TException> CaptureExceptionAsync<TException>(Func<Task> action)
+            where TException : Exception
+        {
+            try
+            {
+                await action();
+            }
+            catch (TException exception)
+            {
+                return exception;
+            }
+
+            throw new AssertionException($"Expected an exception of type {typeof(TException).FullName}.");
         }
 
         private sealed class FakeTokenSource : IFirebaseIdTokenSource
