@@ -964,11 +964,17 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         currentMode = AppMode.Naming;
         if (tempSnapshot == null) { Debug.LogError("Snapshot is missing!"); return; }
-        // Explicitly use UnityEngine.Rect
-        var sprite = Sprite.Create(tempSnapshot, new UnityEngine.Rect(0, 0, tempSnapshot.width, tempSnapshot.height), new Vector2(0.5f, 0.5f));
+
+        // The naming screen only confirms the object, so show the centre square that was actually
+        // registered rather than the full frame (which would spill past the square photo frame).
+        var crop = ImageGeometry.CenterCrop(tempSnapshot.width, tempSnapshot.height, guideFractionOfPreview);
+        var sprite = Sprite.Create(
+            tempSnapshot,
+            new UnityEngine.Rect(crop.X, crop.Y, crop.Width, crop.Height),
+            new Vector2(0.5f, 0.5f));
         if (snapshotDisplay_Naming != null) snapshotDisplay_Naming.sprite = sprite;
         else Debug.LogError("SnapshotDisplay_Naming is not assigned!");
-        FitSnapshotAspect(snapshotDisplay_Naming, tempSnapshot);
+        FitGraphicAspect(snapshotDisplay_Naming, crop.Width / (float)crop.Height);
 
         if (namingPanel != null) namingPanel.SetActive(true);
         if (placementPanel != null) placementPanel.SetActive(false);
@@ -1588,7 +1594,17 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     /// </summary>
     private static void FitSnapshotAspect(Graphic display, Texture2D texture)
     {
-        if (display == null || texture == null || texture.height == 0)
+        if (texture == null || texture.height == 0)
+        {
+            return;
+        }
+
+        FitGraphicAspect(display, texture.width / (float)texture.height);
+    }
+
+    private static void FitGraphicAspect(Graphic display, float ratio)
+    {
+        if (display == null || ratio <= 0f)
         {
             return;
         }
@@ -1596,7 +1612,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         var fitter = display.GetComponent<AspectRatioFitter>();
         if (fitter != null)
         {
-            fitter.aspectRatio = texture.width / (float)texture.height;
+            fitter.aspectRatio = ratio;
         }
     }
 
