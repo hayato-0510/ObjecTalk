@@ -107,12 +107,48 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     public RectTransform placementEyeImage;
     public RectTransform placementMouthImage;
 
-    [Tooltip("撮影枚数と再撮影の案内を表示するテキスト。未設定なら resultText を使う。")]
+    [Tooltip("登録モードの読み上げ枠。RegisterCameraPanel の中に置く。撮影進捗（n / 3 枚目、撮影完了）に加え、" +
+             "登録中に出るエラーもここに表示する。Talk モードのメッセージは resultText 側に出る。")]
     public TMP_Text registrationStatusText;
+
+    [Tooltip("撮影進捗のドット3個。左から撮影済みを点灯する。")]
+    public Image[] registrationDots;
+
+    [Tooltip("撮影の狙いを説明するテキスト。")]
+    public TMP_Text registrationInstructionText;
+
+    [Range(0.3f, 1f)]
+    [Tooltip("中央クロップの唯一の基準値（短辺に対する割合）。embedding が実際に切り出す箱と、各カメラ面の" +
+             "ガイド枠／緑マスクの両方をこの値が駆動する。ImageGeometry.DefaultCropFraction に合わせる。")]
+    public float guideFractionOfPreview = ImageGeometry.DefaultCropFraction;
+
+    [Tooltip("登録カメラプレビューの切り出しガイド（枠＋緑マスク）。CameraDisplay(reg) の子。")]
+    public CropGuideOverlay cropOverlayRegister;
+
+    [Tooltip("配置スナップショットの切り出しガイド（枠＋緑マスク）。SnapshotDisplay の子。")]
+    public CropGuideOverlay cropOverlayPlacement;
+
+    [Tooltip("Talk カメラプレビューの切り出しガイド（枠＋緑マスク）。CameraDisplay(talk) の子。")]
+    public CropGuideOverlay cropOverlayTalk;
+
+    [Tooltip("撮影が受理された瞬間に一瞬光る全画面の白オーバーレイ。Canvas 直下・raycastTarget off・初期 alpha 0。")]
+    public Image captureFlashOverlay;
+
+    [Range(0.05f, 0.5f)]
+    [Tooltip("撮影フラッシュのフェード時間（秒）。")]
+    public float captureFlashDuration = 0.15f;
 
     [Header("Recognition Mode UI (TalkCameraPanel)")]
     public Image recognitionEyeImage;
     public Image recognitionMouthImage;
+
+    [Range(0.05f, 0.5f)]
+    [Tooltip("認識中の目オーバーレイの大きさ（プレビュー短辺に対する割合）。")]
+    public float overlayEyeFraction = 0.18f;
+
+    [Range(0.05f, 0.5f)]
+    [Tooltip("認識中の口オーバーレイの大きさ（プレビュー短辺に対する割合）。")]
+    public float overlayMouthFraction = 0.22f;
 
     [Header("Style Selection UI")]
     public ScrollRect styleScrollViewRect;
@@ -156,6 +192,34 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private WebCamTexture webcamTexture;
     private string _registrationObjectId;
     private bool _cameraAuthorized;
+
+    // --- Upright camera frame ---
+    // Recognition, registration capture, the placement snapshot, and both preview RawImages all
+    // read _orientedFrame so the AI and the user see the same upright, un-mirrored image. It is
+    // rebuilt whenever the camera size or reported orientation changes.
+    private RenderTexture _orientedFrame;
+    private Material _orientBlitMaterial;
+    private Mesh _orientQuad;
+    private FrameOrientation _frameOrientation;
+    private int _orientedSourceWidth;
+    private int _orientedSourceHeight;
+    // Front cameras are horizontally mirrored; back cameras are not. This tracks the active device
+    // so the oriented frame flips to match, the same rule as Webcamera.cs (localScale.x = -1 when
+    // device.isFrontFacing). WebCamTexture.videoVerticallyMirrored is a different signal and is not
+    // used here.
+    private bool _cameraIsFrontFacing;
+    private bool _warnedNoBlitMaterial;
+    // Set when the render texture cannot be created for the current camera size/orientation, so the
+    // rebuild is not re-attempted (and re-logged) every frame; cleared when the source changes and
+    // whenever the panel or the application comes back to the foreground, so a transient failure
+    // does not degrade the rest of the process's life.
+    private bool _orientedFrameUnavailable;
+
+    // One-shot so an unwired registration readout does not log on every capture.
+    private bool _warnedNoStatusText;
+
+    // Running capture-flash fade; see FlashCapture.
+    private Coroutine _flashRoutine;
 
     /// <summary>Leaves the camera flow: stops the camera and loads the home scene.</summary>
     public void ReturnToHome()
@@ -229,7 +293,14 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             return;
         }
 
-        _preprocessor = new CameraFramePreprocessor();
+        // guideFractionOfPreview is the single source of truth for the centre crop: the same value
+        // drives the on-preview guide frame and the box the embedding actually keeps, so nudging the
+        // Inspector field cannot silently desync them. The [Range] attribute keeps it inside the
+        // (0, 1] the preprocessor requires.
+        _preprocessor = new CameraFramePreprocessor(
+            ImageGeometry.EmbeddingImageSize,
+            ImageGeometry.MaximumVerificationImageSize,
+            guideFractionOfPreview);
         _verifier = BuildLocalFeatureVerifier();
         _extractor = new SentisEmbeddingExtractor();
 
@@ -307,6 +378,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     /// </summary>
     private IEnumerator EnablePanelRoutine()
     {
+        // A failed RenderTexture.Create() is usually transient (a memory spike, a lost device), so
+        // give the oriented frame a fresh attempt every time the panel comes back rather than
+        // leaving the session on the raw camera texture for good.
+        _orientedFrameUnavailable = false;
+
         yield return RequestCameraAuthorization();
 
         if (!_cameraAuthorized)
@@ -324,7 +400,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 yield break;
             }
 
-            webcamTexture = new WebCamTexture(WebCamTexture.devices[0].name, 1280, 720, 30);
+            var device = WebCamTexture.devices[0];
+            _cameraIsFrontFacing = device.isFrontFacing;
+            webcamTexture = new WebCamTexture(device.name, 1280, 720, 30);
         }
 
         // --- Load latest data from DB ---
@@ -332,24 +410,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         LoadRegisteredObjects();
         // --- End Load ---
 
-        // 1. Assign WebCamTexture to both RawImages and reset color
-        if (registerCameraDisplay != null)
-        {
-            registerCameraDisplay.texture = webcamTexture;
-            registerCameraDisplay.color = Color.white;
-        }
-        if (talkCameraDisplay != null)
-        {
-            talkCameraDisplay.texture = webcamTexture;
-            talkCameraDisplay.color = Color.white;
-        }
-
-        // 2. Start the camera if it's not already playing
+        // 1. Start the camera if it's not already playing
         if (!webcamTexture.isPlaying)
         {
             Debug.Log("OnEnable: Starting Webcam...");
             webcamTexture.Play();
         }
+
+        // 2. Point both previews at the active camera frame. Until the camera delivers a real
+        //    frame and EnsureOrientedFrame() builds _orientedFrame, ActiveCameraFrame() returns
+        //    the raw texture; Update() re-applies the oriented frame once it exists.
+        ApplyCameraDisplay(registerCameraDisplay);
+        ApplyCameraDisplay(talkCameraDisplay);
 
         _recognitionService?.Resume();
 
@@ -367,8 +439,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
             currentMode = AppMode.Recognition;
             if (resultText != null && _recognitionAvailable) resultText.text = RecognitionMessages.Searching;
-            if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
-            if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
+            HideFaceOverlay();
+            ShowOverlay(cropOverlayTalk);
         }
         else // DesiredMode == StartupMode.Register
         {
@@ -409,7 +481,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
         // Pause abandons the run in flight and hands the GPU buffers back.
         _recognitionService?.Pause();
-        UpdateRecognitionState(false, "", "", 0f);
+        UpdateRecognitionState(false, null, "", 0f);
+        HideAllOverlays();
     }
 
     /// <summary>Releases camera and inference work while the application is backgrounded.</summary>
@@ -419,7 +492,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             if (webcamTexture != null && webcamTexture.isPlaying) webcamTexture.Stop();
             _recognitionService?.Pause();
-            UpdateRecognitionState(false, "", "", 0f);
+            UpdateRecognitionState(false, null, "", 0f);
             return;
         }
 
@@ -434,6 +507,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour
 
     private IEnumerator ResumeAfterApplicationPause()
     {
+        // Same as EnablePanelRoutine: retry the oriented frame now the app is in the foreground.
+        _orientedFrameUnavailable = false;
+
         yield return RequestCameraAuthorization();
 
         if (!_cameraAuthorized)
@@ -450,8 +526,239 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         _recognitionService?.Resume();
     }
 
+    #region Upright camera frame
+
+    /// <summary>
+    /// The frame recognition, registration, and the preview all read: <see cref="_orientedFrame"/>
+    /// once it is built for the current camera size/orientation; the raw texture until then (or on
+    /// fallback).
+    /// </summary>
+    private Texture ActiveCameraFrame()
+    {
+        return _orientedFrame != null ? (Texture)_orientedFrame : webcamTexture;
+    }
+
+    /// <summary>
+    /// Builds (or rebuilds) <see cref="_orientedFrame"/> for the camera's current size and reported
+    /// orientation. A no-op until the camera delivers a real frame; on a failure to create the
+    /// render texture it warns and leaves the previews on the raw texture.
+    /// </summary>
+    private void EnsureOrientedFrame()
+    {
+        if (webcamTexture == null || webcamTexture.width <= 16 || webcamTexture.height <= 16)
+        {
+            return; // camera has not delivered a real frame yet
+        }
+
+        var orientation = FrameOrientation.FromWebCam(
+            (int)webcamTexture.videoRotationAngle, _cameraIsFrontFacing);
+
+        var sourceUnchanged = _orientedSourceWidth == webcamTexture.width
+            && _orientedSourceHeight == webcamTexture.height
+            && _frameOrientation.Equals(orientation);
+
+        if (!sourceUnchanged)
+        {
+            // One line per orientation change: enough to diagnose an upside-down or mirrored
+            // preview on a device from logcat without a rebuild.
+            Debug.Log($"EmbeddingObjectMatcher camera frame: {webcamTexture.width}x{webcamTexture.height} "
+                + $"videoRotationAngle={webcamTexture.videoRotationAngle} "
+                + $"videoVerticallyMirrored={webcamTexture.videoVerticallyMirrored} "
+                + $"isFrontFacing={_cameraIsFrontFacing} -> {orientation} | "
+                + $"graphicsUVStartsAtTop={SystemInfo.graphicsUVStartsAtTop} "
+                + $"device={SystemInfo.graphicsDeviceType}");
+        }
+
+        // Nothing to do while the source is unchanged and we already have a frame (or have already
+        // given up on this source). Re-attempting a failed Create() every frame would leak GPU
+        // memory and spam the log.
+        if (sourceUnchanged && (_orientedFrame != null || _orientedFrameUnavailable))
+        {
+            return;
+        }
+
+        ReleaseOrientedFrame();
+        _orientedFrameUnavailable = false;
+        _frameOrientation = orientation;
+        _orientedSourceWidth = webcamTexture.width;
+        _orientedSourceHeight = webcamTexture.height;
+        var (w, h) = orientation.OrientedSize(webcamTexture.width, webcamTexture.height);
+
+        try
+        {
+            _orientedFrame = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32)
+            {
+                name = "ObjecTalk Oriented Camera Frame",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            _orientedFrame.Create();
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("EmbeddingObjectMatcher: could not create the oriented camera frame "
+                + $"({e.GetType().Name}: {e.Message}); recognition and preview fall back to the raw "
+                + "camera texture.");
+            ReleaseOrientedFrame();
+            _orientedFrameUnavailable = true;
+            ApplyCameraDisplay(registerCameraDisplay);
+            ApplyCameraDisplay(talkCameraDisplay);
+            return;
+        }
+
+        if (!_orientedFrame.IsCreated())
+        {
+            Debug.LogWarning("EmbeddingObjectMatcher: could not create the oriented camera frame; "
+                + "recognition and preview fall back to the raw camera texture.");
+            ReleaseOrientedFrame();
+            _orientedFrameUnavailable = true;
+            ApplyCameraDisplay(registerCameraDisplay);
+            ApplyCameraDisplay(talkCameraDisplay);
+            return;
+        }
+
+        if (_orientBlitMaterial == null)
+        {
+            // Unlit/Texture is in Always Included Shaders (ProjectSettings/GraphicsSettings.asset),
+            // which is what makes Shader.Find resolve it in a player build; the rest of the chain is
+            // defence in depth. Shader.Find returns a genuine null on miss, so ?? is safe here.
+            var shader = Shader.Find("Unlit/Texture")
+                ?? Shader.Find("Hidden/BlitCopy")
+                ?? Shader.Find("Sprites/Default");
+            if (shader != null)
+            {
+                _orientBlitMaterial = new Material(shader);
+            }
+        }
+        if (_orientQuad == null)
+        {
+            _orientQuad = BuildUnitQuad();
+        }
+
+        // UVs are constant per orientation, so upload them once here rather than every frame.
+        ApplyOrientedQuadUVs();
+
+        ApplyCameraDisplay(registerCameraDisplay);
+        ApplyCameraDisplay(talkCameraDisplay);
+    }
+
+    /// <summary>
+    /// Draws the raw <see cref="webcamTexture"/> into <see cref="_orientedFrame"/> the right way up.
+    /// Uses a plain identity blit when the source is already upright, or when no blit material could
+    /// be created (a warning is logged once) so recognition never NullRefs.
+    /// </summary>
+    private void RenderOrientedFrame()
+    {
+        if (_orientedFrame == null || webcamTexture == null)
+        {
+            return;
+        }
+
+        if (_frameOrientation.IsIdentity || _orientBlitMaterial == null || _orientQuad == null)
+        {
+            if (!_frameOrientation.IsIdentity && _orientBlitMaterial == null && !_warnedNoBlitMaterial)
+            {
+                Debug.LogWarning("EmbeddingObjectMatcher: no blit material for the oriented camera "
+                    + "frame; preview and recognition use the raw camera orientation.");
+                _warnedNoBlitMaterial = true;
+            }
+            Graphics.Blit(webcamTexture, _orientedFrame);
+            return;
+        }
+
+        var previous = RenderTexture.active;
+        RenderTexture.active = _orientedFrame;
+        GL.PushMatrix();
+        try
+        {
+            GL.LoadOrtho();
+            _orientBlitMaterial.mainTexture = webcamTexture;
+            _orientBlitMaterial.SetPass(0);
+            Graphics.DrawMeshNow(_orientQuad, Vector3.zero, Quaternion.identity);
+        }
+        finally
+        {
+            GL.PopMatrix();
+            RenderTexture.active = previous;
+        }
+    }
+
+    /// <summary>Uploads the source-sample UVs for the current orientation onto the blit quad.</summary>
+    private void ApplyOrientedQuadUVs()
+    {
+        if (_orientQuad == null)
+        {
+            return;
+        }
+
+        var uv = _frameOrientation.SourceUVsForOrientedCorners(); // (float u, float v)[]
+        var uvList = new List<Vector2>(4);
+        foreach (var corner in uv) uvList.Add(new Vector2(corner.u, corner.v));
+        _orientQuad.SetUVs(0, uvList);
+        _orientQuad.UploadMeshData(false);
+    }
+
+    // Vertices are the unit square in BL, BR, TR, TL order; triangles are wound clockwise so the
+    // quad is front-facing under GL.LoadOrtho() and survives a Cull Back blit shader.
+    private static Mesh BuildUnitQuad()
+    {
+        return new Mesh
+        {
+            vertices = new[]
+            {
+                new Vector3(0, 0, 0), new Vector3(1, 0, 0),
+                new Vector3(1, 1, 0), new Vector3(0, 1, 0),
+            },
+            uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) },
+            triangles = new[] { 0, 2, 1, 0, 3, 2 },
+        };
+    }
+
+    private void ApplyCameraDisplay(RawImage display)
+    {
+        if (display == null)
+        {
+            return;
+        }
+
+        display.texture = ActiveCameraFrame();
+        display.color = Color.white;
+
+        var fitter = display.GetComponent<AspectRatioFitter>();
+        if (fitter != null && _orientedFrame != null && _orientedFrame.height > 0)
+        {
+            fitter.aspectRatio = _orientedFrame.width / (float)_orientedFrame.height;
+
+            // The fitter has just resized the preview, so a guide square fitted against the
+            // pre-layout rect at panel activation is now stale.
+            var overlay = display == registerCameraDisplay ? cropOverlayRegister
+                : display == talkCameraDisplay ? cropOverlayTalk
+                : null;
+            overlay?.Refresh();
+        }
+    }
+
+    private void ReleaseOrientedFrame()
+    {
+        if (_orientedFrame != null)
+        {
+            _orientedFrame.Release();
+            Destroy(_orientedFrame);
+            _orientedFrame = null;
+        }
+    }
+
+    #endregion
+
     void Update()
     {
+        // Keep the upright frame current for the preview even when recognition is unavailable.
+        if (webcamTexture != null && webcamTexture.didUpdateThisFrame)
+        {
+            EnsureOrientedFrame();
+            RenderOrientedFrame();
+        }
+
         if (!_recognitionAvailable)
         {
             return;
@@ -463,7 +770,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             && webcamTexture != null
             && webcamTexture.didUpdateThisFrame)
         {
-            _recognitionService.StartRecognition(webcamTexture, Time.timeAsDouble);
+            _recognitionService.StartRecognition(ActiveCameraFrame(), Time.timeAsDouble);
         }
 
         // One bounded slice of work per frame, whichever kind of run is in flight.
@@ -478,18 +785,17 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             case RecognitionTickStatus.Recognized:
                 if (_objectsById.TryGetValue(result.ObjectId, out var recognized))
                 {
-                    UpdateRecognitionState(true, result.ObjectId, recognized.Name, result.Score);
+                    UpdateRecognitionState(true, recognized, result.ObjectId, result.Score);
                 }
                 break;
 
             case RecognitionTickStatus.NotRecognized:
-                UpdateRecognitionState(false, "", "", 0f);
+                UpdateRecognitionState(false, null, "", 0f);
                 break;
 
             case RecognitionTickStatus.CaptureAccepted:
-                SetStatusText(RecognitionMessages.RegistrationProgress(
-                    result.CapturedViewCount,
-                    RecognitionSettings.RequiredSamplesPerObject));
+                FlashCapture();
+                SetRegistrationProgress(result.CapturedViewCount);
                 if (result.CapturedViewCount >= RecognitionSettings.RequiredSamplesPerObject)
                 {
                     EnterPlacementFromCaptures();
@@ -514,6 +820,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         if (webcamTexture != null)
         {
             if (webcamTexture.isPlaying) webcamTexture.Stop();
+        }
+
+        ReleaseOrientedFrame();
+        if (_orientBlitMaterial != null)
+        {
+            Destroy(_orientBlitMaterial);
+            _orientBlitMaterial = null;
+        }
+        if (_orientQuad != null)
+        {
+            Destroy(_orientQuad);
+            _orientQuad = null;
         }
 
         dbManager?.Dispose();
@@ -552,28 +870,29 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     {
         if (!change.IsRecognized)
         {
-            UpdateRecognitionState(false, "", "", 0f, false);
+            UpdateRecognitionState(false, null, "", 0f, false);
             return;
         }
 
         if (_objectsById.TryGetValue(change.ObjectId, out var registered))
         {
-            UpdateRecognitionState(true, change.ObjectId, registered.Name, change.Score, false);
+            UpdateRecognitionState(true, registered, change.ObjectId, change.Score, false);
         }
     }
 
     /// <summary>
-    /// 物体認識状態を更新し、変化があればイベントを発火します
+    /// 物体認識状態を更新し、変化があればイベントを発火します。認識中は登録済みの目・口を
+    /// Talk プレビューに重ねます（<paramref name="recognized"/> が null なら非表示）。
     /// </summary>
     private void UpdateRecognitionState(
         bool isRecognized,
+        RegisteredObject recognized,
         string objectId,
-        string objectName,
         float confidence,
         bool publishObservation = true)
     {
         int newState = isRecognized ? 1 : 0;
-        string newName = isRecognized ? objectName : "";
+        string newName = isRecognized ? (recognized != null ? recognized.Name : "") : "";
         string newObjectId = isRecognized ? objectId : "";
         bool legacyStateChanged = publishObservation
             ? _recognitionEvents.PublishObservation(
@@ -596,12 +915,14 @@ public class EmbeddingObjectMatcher : MonoBehaviour
                 resultText.text = isRecognized ? newName : RecognitionMessages.Searching;
             }
 
-            if (isRecognized)
+            if (isRecognized && recognized != null)
             {
-                Debug.Log($"★ 物体認識: ON (1) - 物体名: {objectName}");
+                ShowFaceOverlay(recognized);
+                Debug.Log($"★ 物体認識: ON (1) - 物体名: {newName}");
             }
             else
             {
+                HideFaceOverlay();
                 Debug.Log($"★ 物体認識: OFF (0)");
             }
         }
@@ -613,18 +934,86 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Places the registered eye / mouth sprites over the recognition preview at their stored
+    /// relative positions. There is no bounding-box tracking, so the pieces sit at a fixed spot on
+    /// the preview — correct as long as the object fills the guide square it was captured in.
+    /// </summary>
+    private void ShowFaceOverlay(RegisteredObject obj)
+    {
+        if (DesiredMode != StartupMode.Talk || talkCameraDisplay == null)
+        {
+            HideFaceOverlay();
+            return;
+        }
+
+        var previewRect = talkCameraDisplay.rectTransform.rect;
+        PlaceOverlayPiece(recognitionEyeImage, eyeStyles, obj.EyeStyleId,
+            obj.RelativeEyePosition, overlayEyeFraction, previewRect);
+        PlaceOverlayPiece(recognitionMouthImage, mouthStyles, obj.MouthStyleId,
+            obj.RelativeMouthPosition, overlayMouthFraction, previewRect);
+    }
+
+    private static void PlaceOverlayPiece(Image image, List<Sprite> styles, int styleId,
+        Vector2 relative, float fraction, Rect previewRect)
+    {
+        if (image == null)
+        {
+            return;
+        }
+
+        bool placeable = styleId >= 0 && styles != null && styleId < styles.Count
+                         && styles[styleId] != null
+                         && relative.x >= 0f && relative.y >= 0f
+                         && previewRect.width > 0f && previewRect.height > 0f;
+        if (!placeable)
+        {
+            image.gameObject.SetActive(false);
+            return;
+        }
+
+        image.sprite = styles[styleId];
+
+        var (x, y) = FaceOverlayLayout.AnchoredPosition(
+            relative.x, relative.y, previewRect.width, previewRect.height);
+
+        var rt = image.rectTransform;
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(x, y);
+
+        float side = Mathf.Min(previewRect.width, previewRect.height) * fraction;
+        rt.sizeDelta = new Vector2(side, side);
+
+        image.gameObject.SetActive(true);
+    }
+
+    private void HideFaceOverlay()
+    {
+        if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
+        if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
+    }
+
     #region Mode Switching
     private void SwitchToNamingMode()
     {
         currentMode = AppMode.Naming;
         if (tempSnapshot == null) { Debug.LogError("Snapshot is missing!"); return; }
-        // Explicitly use UnityEngine.Rect
-        var sprite = Sprite.Create(tempSnapshot, new UnityEngine.Rect(0, 0, tempSnapshot.width, tempSnapshot.height), new Vector2(0.5f, 0.5f));
+
+        // The naming screen only confirms the object, so show the centre square that was actually
+        // registered rather than the full frame (which would spill past the square photo frame).
+        var crop = ImageGeometry.CenterCrop(tempSnapshot.width, tempSnapshot.height, guideFractionOfPreview);
+        var sprite = Sprite.Create(
+            tempSnapshot,
+            new UnityEngine.Rect(crop.X, crop.Y, crop.Width, crop.Height),
+            new Vector2(0.5f, 0.5f));
         if (snapshotDisplay_Naming != null) snapshotDisplay_Naming.sprite = sprite;
         else Debug.LogError("SnapshotDisplay_Naming is not assigned!");
+        FitGraphicAspect(snapshotDisplay_Naming, crop.Width / (float)crop.Height);
 
         if (namingPanel != null) namingPanel.SetActive(true);
         if (placementPanel != null) placementPanel.SetActive(false);
+        cropOverlayPlacement?.Hide();
 
         if (nameInputField != null) nameInputField.text = "";
         if (categoryInputField != null) categoryInputField.text = "";
@@ -637,6 +1026,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // Explicitly use UnityEngine.Rect
         if (snapshotDisplay_Placement != null) snapshotDisplay_Placement.sprite = Sprite.Create(snapshot, new UnityEngine.Rect(0, 0, snapshot.width, snapshot.height), new Vector2(0.5f, 0.5f));
         else Debug.LogError("SnapshotDisplay_Placement is not assigned!");
+        FitSnapshotAspect(snapshotDisplay_Placement, snapshot);
 
         if (mouthToggle != null) mouthToggle.isOn = false;
         if (eyeToggle != null) eyeToggle.isOn = true; // Default to eye styles
@@ -648,6 +1038,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         // Reset IDs
         currentEyeId = -1;
         currentMouthId = -1;
+        ShowOverlay(cropOverlayPlacement);
         Debug.Log("Switched to Placement Mode.");
     }
     #endregion
@@ -690,7 +1081,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         _registrationObjectId = Guid.NewGuid().ToString();
         _recognitionService.BeginRegistration(_registrationObjectId);
         DestroySnapshot();
-        SetStatusText(RecognitionMessages.RegistrationProgress(0, RecognitionSettings.RequiredSamplesPerObject));
+        SetRegistrationProgress(0);
+        ShowOverlay(cropOverlayRegister);
         SetRegisterButtonInteractable(true);
     }
 
@@ -720,14 +1112,28 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             BeginRegistrationSession();
         }
 
-        // The first view is the one the user places the face on, so keep its snapshot.
+        // The first view is the one the user places the face on, so keep its snapshot. It must
+        // match the upright frame the recognition sees, so read it from ActiveCameraFrame().
         if (tempSnapshot == null)
         {
             try
             {
-                tempSnapshot = new Texture2D(webcamTexture.width, webcamTexture.height, TextureFormat.RGB24, false);
-                tempSnapshot.SetPixels(webcamTexture.GetPixels());
-                tempSnapshot.Apply();
+                var active = ActiveCameraFrame();
+                var readable = RenderTexture.GetTemporary(active.width, active.height, 0, RenderTextureFormat.ARGB32);
+                var previousActive = RenderTexture.active;
+                try
+                {
+                    Graphics.Blit(active, readable);
+                    RenderTexture.active = readable;
+                    tempSnapshot = new Texture2D(readable.width, readable.height, TextureFormat.RGB24, false);
+                    tempSnapshot.ReadPixels(new UnityEngine.Rect(0, 0, readable.width, readable.height), 0, 0);
+                    tempSnapshot.Apply();
+                }
+                finally
+                {
+                    RenderTexture.active = previousActive;
+                    RenderTexture.ReleaseTemporary(readable);
+                }
                 Debug.Log("Snapshot taken.");
             }
             catch (Exception e)
@@ -738,7 +1144,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             }
         }
 
-        var status = _recognitionService.CaptureRegistrationView(webcamTexture);
+        var status = _recognitionService.CaptureRegistrationView(ActiveCameraFrame());
         switch (status)
         {
             case RegistrationCaptureStatus.Started:
@@ -763,6 +1169,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     private void EnterPlacementFromCaptures()
     {
         SetRegisterButtonInteractable(true);
+        cropOverlayRegister?.Hide();
         if (tempSnapshot == null)
         {
             Debug.LogError("Three views were captured but no snapshot was kept.");
@@ -830,6 +1237,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.Log("Back button pressed on Recognition panel. Returning to selection panel.");
 
             CancelRegistrationSession();
+            HideAllOverlays();
 
             // 1. モード選択パネルを表示する
             if (talkSelectionPanel != null)
@@ -859,6 +1267,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             currentMode = AppMode.Placement;
             if (namingPanel != null) namingPanel.SetActive(false);
             if (placementPanel != null) placementPanel.SetActive(true);
+            ShowOverlay(cropOverlayPlacement);
             // Re-populate styles
             if (eyeToggle != null && mouthToggle != null)
             {
@@ -872,6 +1281,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             Debug.Log("Back button pressed on Placement panel. Returning to register camera.");
             currentMode = AppMode.Recognition;
             if (placementPanel != null) placementPanel.SetActive(false);
+            cropOverlayPlacement?.Hide();
 
             if (registerCameraPanel != null) registerCameraPanel.SetActive(true);
             if (talkCameraPanel != null) talkCameraPanel.SetActive(false);
@@ -920,9 +1330,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour
             || _recognitionService.CapturedViewCount != RecognitionSettings.RequiredSamplesPerObject)
         {
             Debug.LogWarning("Registration needs three valid captures before it can be saved.");
-            SetStatusText(RecognitionMessages.RegistrationProgress(
-                _recognitionService?.CapturedViewCount ?? 0,
-                RecognitionSettings.RequiredSamplesPerObject));
+            SetRegistrationProgress(_recognitionService?.CapturedViewCount ?? 0);
             if (confirmButton != null) confirmButton.interactable = true;
             return;
         }
@@ -1127,9 +1535,25 @@ public class EmbeddingObjectMatcher : MonoBehaviour
     #endregion
 
     #region UI helpers
+    /// <summary>
+    /// Status, error, and recognition messages. The two readouts sit on different panels —
+    /// <see cref="registrationStatusText"/> under RegisterCameraPanel, <see cref="resultText"/> under
+    /// TalkCameraPanel — and each panel hides the other's text, so a single fixed target is invisible
+    /// in one of the two modes. The target is therefore chosen by which camera panel is actually
+    /// active. Routing by activation rather than by <see cref="DesiredMode"/> also gets the
+    /// EnablePanelRoutine permission/camera failures right: they run before the mode switch has
+    /// activated either panel, so "whatever is on screen right now" is the only correct answer there.
+    /// </summary>
     private void SetStatusText(string message)
     {
-        var target = registrationStatusText != null ? registrationStatusText : resultText;
+        var registering = registerCameraPanel != null && registerCameraPanel.activeInHierarchy;
+        var target = registering ? registrationStatusText : resultText;
+        if (target == null)
+        {
+            // The preferred readout is unwired; the other one is still better than nothing.
+            target = registering ? resultText : registrationStatusText;
+        }
+
         if (target != null)
         {
             target.text = message;
@@ -1138,6 +1562,131 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         {
             Debug.Log(message);
         }
+    }
+
+    /// <summary>
+    /// Updates the "n / 3 枚目" readout, the angle hint, and the progress dots for the number of
+    /// views captured so far. The decision is <see cref="RegistrationProgressView"/>'s; this method
+    /// only applies it. Every reference is optional; a missing one is skipped, not fatal.
+    /// </summary>
+    private void SetRegistrationProgress(int capturedViews)
+    {
+        var view = RegistrationProgressView.For(capturedViews, RecognitionSettings.RequiredSamplesPerObject);
+
+        if (registrationStatusText != null)
+        {
+            registrationStatusText.text = view.Status;
+        }
+        else if (!_warnedNoStatusText)
+        {
+            Debug.LogWarning("registrationStatusText is not set; registration progress is not shown.");
+            _warnedNoStatusText = true;
+        }
+
+        if (registrationInstructionText != null)
+        {
+            registrationInstructionText.text = view.Instruction;
+        }
+
+        if (registrationDots != null)
+        {
+            for (var i = 0; i < registrationDots.Length; i++)
+            {
+                if (registrationDots[i] != null)
+                {
+                    registrationDots[i].enabled = i < view.LitDots;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Shows one crop-guide overlay, first syncing its fraction to <see cref="guideFractionOfPreview"/>
+    /// so the frame and green surround always match the box the embedding actually keeps.
+    /// </summary>
+    private void ShowOverlay(CropGuideOverlay overlay)
+    {
+        if (overlay == null)
+        {
+            return;
+        }
+
+        overlay.fraction = guideFractionOfPreview;
+        overlay.Show();
+    }
+
+    private void HideAllOverlays()
+    {
+        cropOverlayRegister?.Hide();
+        cropOverlayPlacement?.Hide();
+        cropOverlayTalk?.Hide();
+    }
+
+    /// <summary>
+    /// Keeps a snapshot Image from stretching by feeding its <see cref="AspectRatioFitter"/> the
+    /// captured texture's aspect. Also keeps the placement eye/mouth position maths honest, since
+    /// those read the snapshot rect.
+    /// </summary>
+    private static void FitSnapshotAspect(Graphic display, Texture2D texture)
+    {
+        if (texture == null || texture.height == 0)
+        {
+            return;
+        }
+
+        FitGraphicAspect(display, texture.width / (float)texture.height);
+    }
+
+    private static void FitGraphicAspect(Graphic display, float ratio)
+    {
+        if (display == null || ratio <= 0f)
+        {
+            return;
+        }
+
+        var fitter = display.GetComponent<AspectRatioFitter>();
+        if (fitter != null)
+        {
+            fitter.aspectRatio = ratio;
+        }
+    }
+
+    /// <summary>Flashes the full-screen white overlay once so a capture is unmistakable.</summary>
+    private void FlashCapture()
+    {
+        if (captureFlashOverlay == null)
+        {
+            return;
+        }
+
+        if (_flashRoutine != null)
+        {
+            StopCoroutine(_flashRoutine);
+        }
+
+        _flashRoutine = StartCoroutine(FlashCaptureRoutine());
+    }
+
+    private IEnumerator FlashCaptureRoutine()
+    {
+        var image = captureFlashOverlay;
+        image.gameObject.SetActive(true);
+
+        var colour = image.color;
+        var elapsed = 0f;
+        var duration = Mathf.Max(0.01f, captureFlashDuration);
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            colour.a = Mathf.Lerp(1f, 0f, elapsed / duration);
+            image.color = colour;
+            yield return null;
+        }
+
+        colour.a = 0f;
+        image.color = colour;
+        image.gameObject.SetActive(false);
+        _flashRoutine = null;
     }
 
     private void ShowRecognitionUnavailable(string message)

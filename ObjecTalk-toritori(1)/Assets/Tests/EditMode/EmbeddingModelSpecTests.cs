@@ -42,6 +42,14 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
+        public void Default_UsesTheCrop75UprightPreprocessingVersion()
+        {
+            Assert.That(
+                EmbeddingModelSpec.Default.PreprocessingVersion,
+                Is.EqualTo("rgb01-imagenet-mean-std-crop75-upright-v2"));
+        }
+
+        [Test]
         public void Constructor_RejectsMissingNames()
         {
             Assert.Throws<ArgumentException>(() => Create(modelVersion: " "));

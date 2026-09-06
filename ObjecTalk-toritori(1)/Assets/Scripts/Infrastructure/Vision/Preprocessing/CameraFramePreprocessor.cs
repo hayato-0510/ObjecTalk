@@ -14,6 +14,7 @@ namespace ObjecTalk.Infrastructure.Vision
     {
         private readonly int _embeddingSize;
         private readonly int _maximumVerificationSize;
+        private readonly float _cropFraction;
 
         private RenderTexture _embeddingTexture;
         private RenderTexture _verificationSurface;
@@ -22,11 +23,19 @@ namespace ObjecTalk.Infrastructure.Vision
         private bool _disposed;
 
         public CameraFramePreprocessor()
-            : this(ImageGeometry.EmbeddingImageSize, ImageGeometry.MaximumVerificationImageSize)
+            : this(
+                ImageGeometry.EmbeddingImageSize,
+                ImageGeometry.MaximumVerificationImageSize,
+                ImageGeometry.DefaultCropFraction)
         {
         }
 
         public CameraFramePreprocessor(int embeddingSize, int maximumVerificationSize)
+            : this(embeddingSize, maximumVerificationSize, ImageGeometry.DefaultCropFraction)
+        {
+        }
+
+        public CameraFramePreprocessor(int embeddingSize, int maximumVerificationSize, float cropFraction)
         {
             if (embeddingSize <= 0)
             {
@@ -40,8 +49,16 @@ namespace ObjecTalk.Infrastructure.Vision
                     $"The verification size must be between 1 and {ImageGeometry.MaximumVerificationImageSize}.");
             }
 
+            if (cropFraction <= 0f || cropFraction > 1f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(cropFraction),
+                    "The crop fraction must be in the range (0, 1].");
+            }
+
             _embeddingSize = embeddingSize;
             _maximumVerificationSize = maximumVerificationSize;
+            _cropFraction = cropFraction;
         }
 
         /// <summary>Side length of the square handed to the embedding model.</summary>
@@ -61,7 +78,7 @@ namespace ObjecTalk.Infrastructure.Vision
             ThrowIfDisposed();
             ValidateSource(source);
 
-            var crop = ImageGeometry.NormalizedCenterCrop(source.width, source.height);
+            var crop = ImageGeometry.NormalizedCenterCrop(source.width, source.height, _cropFraction);
             EnsureEmbeddingTexture();
             Blit(source, _embeddingTexture, crop);
             return _embeddingTexture;
@@ -77,11 +94,11 @@ namespace ObjecTalk.Infrastructure.Vision
             ThrowIfDisposed();
             ValidateSource(source);
 
-            var crop = ImageGeometry.CenterCrop(source.width, source.height);
+            var crop = ImageGeometry.CenterCrop(source.width, source.height, _cropFraction);
             var size = Math.Min(ImageGeometry.VerificationImageSize(crop.Width), _maximumVerificationSize);
             EnsureVerificationBuffers(size);
 
-            var normalizedCrop = ImageGeometry.NormalizedCenterCrop(source.width, source.height);
+            var normalizedCrop = ImageGeometry.NormalizedCenterCrop(source.width, source.height, _cropFraction);
             Blit(source, _verificationSurface, normalizedCrop);
 
             var previous = RenderTexture.active;

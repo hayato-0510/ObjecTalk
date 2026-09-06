@@ -167,5 +167,46 @@ namespace ObjecTalk.Tests.EditMode
         {
             Assert.That(ImageGeometry.EmbeddingImageSize, Is.EqualTo(224));
         }
+
+        [Test]
+        public void CenterCrop_WithFraction_ReturnsCenteredSquareOfThatFractionOfTheShortSide()
+        {
+            var crop = ImageGeometry.CenterCrop(640, 480, 0.75f);
+
+            Assert.That(crop.Width, Is.EqualTo(360));   // 0.75 * 480
+            Assert.That(crop.Height, Is.EqualTo(360));
+            Assert.That(crop.X, Is.EqualTo((640 - 360) / 2));
+            Assert.That(crop.Y, Is.EqualTo((480 - 360) / 2));
+        }
+
+        [Test]
+        public void CenterCrop_WithFractionOne_MatchesTheNoFractionOverload()
+        {
+            var withOne = ImageGeometry.CenterCrop(640, 480, 1f);
+            var plain = ImageGeometry.CenterCrop(640, 480);
+
+            Assert.That(withOne, Is.EqualTo(plain));
+        }
+
+        [Test]
+        public void NormalizedCenterCrop_WithFraction_ScalesAndOffsetsBySquareOverSource()
+        {
+            var rect = ImageGeometry.NormalizedCenterCrop(640, 480, 0.75f);
+
+            Assert.That(rect.ScaleX, Is.EqualTo(360f / 640f).Within(1e-5f));
+            Assert.That(rect.ScaleY, Is.EqualTo(360f / 480f).Within(1e-5f));
+            Assert.That(rect.OffsetX, Is.EqualTo(140f / 640f).Within(1e-5f));
+            Assert.That(rect.OffsetY, Is.EqualTo(60f / 480f).Within(1e-5f));
+        }
+
+        [TestCase(0f)]
+        [TestCase(-0.5f)]
+        [TestCase(1.5f)]
+        public void CenterCrop_WithFractionOutsideZeroToOne_Throws(float cropFraction)
+        {
+            Assert.That(
+                () => ImageGeometry.CenterCrop(640, 480, cropFraction),
+                Throws.TypeOf<ArgumentOutOfRangeException>());
+        }
     }
 }
