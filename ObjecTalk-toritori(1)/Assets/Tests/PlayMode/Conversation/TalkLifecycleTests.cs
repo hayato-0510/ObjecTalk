@@ -202,7 +202,7 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
                 return LocalTrack;
             }
 
-            private sealed class FakePeerConnection : IRealtimePeerConnection
+            public sealed class FakePeerConnection : IRealtimePeerConnection
             {
                 private readonly FakePeerConnectionAdapter _owner;
 
@@ -259,7 +259,7 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
                 public void Dispose() => DisposeCalls++;
             }
 
-            private sealed class FakeAudioTrack : IRealtimeAudioTrack
+            public sealed class FakeAudioTrack : IRealtimeAudioTrack
             {
                 public Func<bool> ThrowOnDetach;
                 public int DisposeCalls { get; private set; }
@@ -271,7 +271,7 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
                 public void Dispose() => DisposeCalls++;
             }
 
-            private sealed class FakeDataChannel : IRealtimeDataChannel
+            public sealed class FakeDataChannel : IRealtimeDataChannel
             {
                 public event Action<string> MessageReceived;
                 public readonly List<string> SentMessages = new List<string>();

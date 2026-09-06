@@ -436,7 +436,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 }
             }
 
-            private static async Task WaitForAsyncOperation(RTCAsyncOperationBase operation, CancellationToken cancellationToken)
+            private static async Task WaitForAsyncOperation(AsyncOperationBase operation, CancellationToken cancellationToken)
             {
                 while (!operation.IsDone)
                 {

@@ -4,6 +4,7 @@ using TMPro;
 using System.Collections;
 using System.Collections.Generic;
 using System;
+using ObjecTalk.Core.Conversation;
 using ObjecTalk.Core.Recognition;
 using ObjecTalk.Domain.Conversation;
 using ObjecTalk.Domain.Models;
