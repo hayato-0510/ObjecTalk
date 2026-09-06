@@ -1,0 +1,20 @@
+{
+  "name": "ObjecTalk.Presentation.Talk",
+  "rootNamespace": "ObjecTalk.Presentation.Talk",
+  "references": [
+    "ObjecTalk.Domain.Conversation",
+    "ObjecTalk.Core.Conversation",
+    "ObjecTalk.Infrastructure.Conversation",
+    "ObjecTalk.Database",
+    "Unity.TextMeshPro"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

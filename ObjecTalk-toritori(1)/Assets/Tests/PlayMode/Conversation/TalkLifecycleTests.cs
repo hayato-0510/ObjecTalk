@@ -1,11 +1,16 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using ObjecTalk.Core.Conversation;
 using ObjecTalk.Domain.Conversation;
 using ObjecTalk.Infrastructure.Conversation.OpenAI;
+using ObjecTalk.Presentation.Talk;
+using TMPro;
+using UnityEngine;
 using UnityEngine.TestTools;
 
 namespace ObjecTalk.Tests.PlayMode.Conversation
@@ -146,6 +151,174 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
 
             Assert.That(received.Count, Is.EqualTo(1));
             Assert.That(received[0].ResponseId, Is.EqualTo("response-one"));
+        }
+
+        [UnityTest]
+        public IEnumerator TalkController_RecognizedObjectStartsConversationAndUpdatesJapaneseState()
+        {
+            var root = new GameObject("TalkConversationRoot");
+            root.SetActive(false);
+            var source = root.AddComponent<FakeRecognitionSource>();
+            var status = root.AddComponent<TextMeshProUGUI>();
+            var view = root.AddComponent<TalkView>();
+            view.Configure(status, null);
+            var voice = new FakeVoiceConversationService();
+            var coordinator = CreateCoordinator(voice);
+            var controller = root.AddComponent<TalkController>();
+            controller.InitializeForTests(source, coordinator, voice, view);
+
+            root.SetActive(true);
+            source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => voice.StartedObjectIds.Count == 1);
+
+            Assert.That(voice.StartedObjectIds, Is.EqualTo(new[] { "object-1" }));
+            Assert.That(status.text, Is.EqualTo("聞いています"));
+
+            voice.PublishState(ConversationState.Speaking);
+            Assert.That(status.text, Is.EqualTo("Cupが話しています"));
+
+            UnityEngine.Object.Destroy(root);
+        }
+
+        [UnityTest]
+        public IEnumerator TalkController_ApplicationPauseStopsWithApplicationPaused()
+        {
+            var fixture = CreateTalkFixture();
+            fixture.Root.SetActive(true);
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+
+            fixture.Root.SendMessage("OnApplicationPause", true);
+            yield return WaitUntil(() => fixture.Voice.StopReasons.Count == 1);
+
+            Assert.That(fixture.Voice.StopReasons.Single(), Is.EqualTo(ConversationStopReason.ApplicationPaused));
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
+        [UnityTest]
+        public IEnumerator TalkController_DisableUnsubscribesAndStopsOnlyOnce()
+        {
+            var fixture = CreateTalkFixture();
+            fixture.Root.SetActive(true);
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+
+            fixture.Root.SetActive(false);
+            yield return WaitUntil(() => fixture.Voice.StopReasons.Count == 1);
+            fixture.Source.Emit(Seen("object-2", "Book"));
+            yield return null;
+
+            Assert.That(fixture.Voice.StopReasons, Is.EqualTo(new[] { ConversationStopReason.UserRequested }));
+            Assert.That(fixture.Voice.StartedObjectIds, Is.EqualTo(new[] { "object-1" }));
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
+        private static TalkFixture CreateTalkFixture()
+        {
+            var root = new GameObject("TalkConversationRoot");
+            root.SetActive(false);
+            var source = root.AddComponent<FakeRecognitionSource>();
+            var status = root.AddComponent<TextMeshProUGUI>();
+            var view = root.AddComponent<TalkView>();
+            view.Configure(status, null);
+            var voice = new FakeVoiceConversationService();
+            var coordinator = CreateCoordinator(voice);
+            var controller = root.AddComponent<TalkController>();
+            controller.InitializeForTests(source, coordinator, voice, view);
+            return new TalkFixture(root, source, voice);
+        }
+
+        private static ObjectConversationCoordinator CreateCoordinator(FakeVoiceConversationService voice)
+        {
+            return new ObjectConversationCoordinator(
+                new FixedClock(),
+                new FakeConversationObjectRepository(),
+                voice,
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(2));
+        }
+
+        private static RecognizedObjectState Seen(string objectId, string objectName)
+        {
+            return new RecognizedObjectState(objectId, objectName, true, 0.95f, DateTimeOffset.UtcNow);
+        }
+
+        private static IEnumerator WaitUntil(Func<bool> predicate)
+        {
+            var deadline = Time.realtimeSinceStartup + 1f;
+            while (!predicate() && Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+
+            Assert.That(predicate(), Is.True, "The asynchronous Talk operation did not finish in time.");
+        }
+
+        private sealed class TalkFixture
+        {
+            public TalkFixture(GameObject root, FakeRecognitionSource source, FakeVoiceConversationService voice)
+            {
+                Root = root;
+                Source = source;
+                Voice = voice;
+            }
+
+            public GameObject Root { get; }
+            public FakeRecognitionSource Source { get; }
+            public FakeVoiceConversationService Voice { get; }
+        }
+
+        private sealed class FakeRecognitionSource : MonoBehaviour, IRecognitionObservationSource
+        {
+            public event Action<RecognizedObjectState> RecognitionChanged;
+            public string CurrentUserId => "user-1";
+            public void Emit(RecognizedObjectState state) => RecognitionChanged?.Invoke(state);
+        }
+
+        private sealed class FixedClock : IClock
+        {
+            public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+        }
+
+        private sealed class FakeConversationObjectRepository : IConversationObjectRepository
+        {
+            public ConversationContext GetContext(string objectId)
+            {
+                return new ConversationContext(objectId, objectId == "object-1" ? "Cup" : "Book", string.Empty, "user-1", "ja");
+            }
+        }
+
+        private sealed class FakeVoiceConversationService : IVoiceConversationService
+        {
+            public readonly List<string> StartedObjectIds = new List<string>();
+            public readonly List<ConversationStopReason> StopReasons = new List<ConversationStopReason>();
+            public ConversationState CurrentState { get; private set; } = ConversationState.Idle;
+            public event Action<ConversationState> StateChanged;
+            public event Action<string> UserTranscriptReceived { add { } remove { } }
+            public event Action<string> AssistantTranscriptReceived { add { } remove { } }
+            public event Action<ConversationFailure> ErrorOccurred { add { } remove { } }
+
+            public Task StartAsync(ConversationContext context, CancellationToken cancellationToken)
+            {
+                StartedObjectIds.Add(context.ObjectId);
+                CurrentState = ConversationState.Listening;
+                StateChanged?.Invoke(CurrentState);
+                return Task.CompletedTask;
+            }
+
+            public Task StopAsync(ConversationStopReason reason, CancellationToken cancellationToken)
+            {
+                StopReasons.Add(reason);
+                CurrentState = ConversationState.Idle;
+                StateChanged?.Invoke(CurrentState);
+                return Task.CompletedTask;
+            }
+
+            public void PublishState(ConversationState state)
+            {
+                CurrentState = state;
+                StateChanged?.Invoke(state);
+            }
         }
 
         private sealed class FakeSdpExchange : IRealtimeSdpExchange

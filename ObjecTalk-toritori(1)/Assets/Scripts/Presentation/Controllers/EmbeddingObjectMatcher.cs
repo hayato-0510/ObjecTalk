@@ -7,6 +7,7 @@ using System;
 using ObjecTalk.Core.Conversation;
 using ObjecTalk.Core.Recognition;
 using ObjecTalk.Domain.Conversation;
+using ObjecTalk.Presentation.Talk;
 using ObjecTalk.Domain.Models;
 using ObjecTalk.Domain.Recognition;
 using ObjecTalk.Infrastructure.AI;
@@ -20,7 +21,7 @@ using UnityEngine.SceneManagement;
 /// registration UI; every recognition decision belongs to <see cref="ObjectRecognitionService"/>,
 /// which this controller only starts, ticks, and renders.
 /// </summary>
-public class EmbeddingObjectMatcher : MonoBehaviour
+public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSource
 {
     // ★★★ 物体認識フラグ ★★★
     /// <summary>
@@ -53,6 +54,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour
         add => _recognitionEvents.ObservationPublished += value;
         remove => _recognitionEvents.ObservationPublished -= value;
     }
+
+    public string CurrentUserId => IntegratedAuthManager.Instance?.CurrentUser?.user_id;
 
     public static StartupMode DesiredMode { get; set; } = StartupMode.Talk;
     public static EmbeddingObjectMatcher Instance { get; private set; } // Singleton Instance
