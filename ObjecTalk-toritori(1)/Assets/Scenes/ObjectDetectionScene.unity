@@ -10171,6 +10171,7 @@ MonoBehaviour:
   view: {fileID: 1996260496}
   microphoneSource: {fileID: 1996260495}
   remoteAudioSource: {fileID: 1996260494}
+  pushToTalkButton: {fileID: 0}
 --- !u!82 &1996260494
 AudioSource:
   m_ObjectHideFlags: 0
@@ -10391,13 +10392,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d2a9f48e8c8841cd91e5b38da7cad103, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  developmentBackendBaseUrl: http://localhost:3000
+  developmentBackendBaseUrl: http://localhost:8080
   productionBackendBaseUrl: 
   useDevelopmentBackend: 1
   recognitionLossGraceSeconds: 10
   objectSwitchConfirmationSeconds: 2
   language: ja
   debugLogging: 0
+  exhibitionMode: 1
+  handsFree: 0
+  sessionMaxSeconds: 120
 --- !u!1 &2009800983
 GameObject:
   m_ObjectHideFlags: 0
