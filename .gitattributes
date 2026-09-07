@@ -1,0 +1,37 @@
+# Unity source and YAML assets — force LF, smart merge, treat as text so diffs are useful.
+*.cs         text diff=csharp
+*.js         text
+*.json       text
+*.md         text
+*.shader     text
+*.cginc      text
+*.uss        text
+*.uxml       text
+
+# Unity serialized files: text, but Unity's own YAML merge tool resolves them.
+*.unity          merge=unityyamlmerge eol=lf
+*.prefab         merge=unityyamlmerge eol=lf
+*.asset          merge=unityyamlmerge eol=lf
+*.mat            merge=unityyamlmerge eol=lf
+*.anim           merge=unityyamlmerge eol=lf
+*.controller     merge=unityyamlmerge eol=lf
+*.meta           merge=unityyamlmerge eol=lf
+*.inputactions   text eol=lf
+
+# Binary assets — never text-diff or line-ending-convert.
+*.onnx   binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.wav    binary
+*.mp3    binary
+*.ogg    binary
+*.ttf    binary
+*.otf    binary
+*.so     binary
+*.a      binary
+*.aar    binary
+*.bundle binary
+*.dll    binary
+*.apk    binary

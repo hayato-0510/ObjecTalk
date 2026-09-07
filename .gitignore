@@ -1,0 +1,24 @@
+# code-review-graph knowledge graph cache
+.code-review-graph/
+
+# Local agent / tooling state
+.superpowers/
+.mcp.json
+.claude/settings.local.json
+
+# Batchmode build + test-run artifacts dropped at the repo root
+/*.log
+/*.xml
+/build-*.log
+/em*.xml
+/pm*.xml
+/editmode-*.*
+/playmode-*.*
+buildlogs/
+
+# Unity build output (also covered by the Unity project's own .gitignore)
+/ObjecTalk-toritori(1)/Builds/
+
+# Backend
+Backend/.env
+Backend/node_modules/
