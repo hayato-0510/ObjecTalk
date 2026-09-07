@@ -3,6 +3,7 @@
   "rootNamespace": "ObjecTalk.Presentation.Talk",
   "references": [
     "ObjecTalk.Domain.Conversation",
+    "ObjecTalk.Domain.Recognition",
     "ObjecTalk.Core.Conversation",
     "ObjecTalk.Infrastructure.Conversation",
     "ObjecTalk.Database",

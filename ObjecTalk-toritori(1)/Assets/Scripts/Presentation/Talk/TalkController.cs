@@ -26,6 +26,8 @@ namespace ObjecTalk.Presentation.Talk
         [SerializeField] private AudioSource remoteAudioSource;
         [Tooltip("Optional. Push-to-talk mode uses this if set; otherwise a hold button is created at runtime.")]
         [SerializeField] private PushToTalkButton pushToTalkButton;
+        [Tooltip("Optional. Animates the face overlay (mouth flap + blink) while the object talks.")]
+        [SerializeField] private FaceOverlayAnimator faceOverlayAnimator;
 
         private IRecognitionObservationSource recognitionSource;
         private ObjectConversationCoordinator coordinator;
@@ -187,6 +189,7 @@ namespace ObjecTalk.Presentation.Talk
                     configuration.RecognitionLossGrace,
                     configuration.ObjectSwitchConfirmation);
                 SetUpPushToTalk();
+                SetUpFaceOverlayAnimator();
             }
             catch (Exception ex)
             {
@@ -223,6 +226,16 @@ namespace ObjecTalk.Presentation.Talk
 
             pushToTalkButton.HeldChanged += OnPushToTalkHeldChanged;
             ShowPushToTalkButton(false);
+        }
+
+        private void SetUpFaceOverlayAnimator()
+        {
+            if (faceOverlayAnimator == null)
+            {
+                faceOverlayAnimator = FindAnyObjectByType<FaceOverlayAnimator>();
+            }
+
+            faceOverlayAnimator?.SetVoiceSource(remoteAudioSource);
         }
 
         private void OnPushToTalkHeldChanged(bool held)
