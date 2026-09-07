@@ -19,6 +19,19 @@ test('sends server session and API key to the OpenAI endpoint', async () => {
   assert.equal(session.audio.output.voice, 'marin');
 });
 
+test('uses the per-object voice selected for this realtime session', async () => {
+  let request;
+  const call = createOpenAIRealtimeCall({
+    apiKey: 'server-key', model: 'gpt-realtime-2.1', voice: 'marin',
+    fetchImpl: async (url, options) => { request = { url, options }; return { ok: true, text: async () => 'answer' }; },
+  });
+
+  await call({ sdp: 'offer', instructions: 'safe rules', voice: 'cedar' });
+
+  const session = JSON.parse(request.options.body.get('session'));
+  assert.equal(session.audio.output.voice, 'cedar');
+});
+
 test('does not expose upstream response body in failure', async () => {
   const call = createOpenAIRealtimeCall({ apiKey: 'key', model: 'model', voice: 'voice', fetchImpl: async () => ({ ok: false, text: async () => 'SECRET' }) });
   await assert.rejects(call({ sdp: 'offer', instructions: 'rules' }), (error) => !error.message.includes('SECRET'));

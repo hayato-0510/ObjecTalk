@@ -1,11 +1,12 @@
 import express from 'express';
 import { extractBearerToken } from './auth/firebaseAuth.js';
 import { buildInstructions } from './conversation/buildInstructions.js';
+import { selectVoice } from './conversation/selectVoice.js';
 import { createInMemoryLimiter } from './rateLimit/inMemoryLimiter.js';
 
 const MAX_SDP_LENGTH = 200_000;
 
-export function createApp({ verifyIdToken, createRealtimeCall, limiter = createInMemoryLimiter() }) {
+export function createApp({ verifyIdToken, createRealtimeCall, voicePools, limiter = createInMemoryLimiter() }) {
   if (typeof verifyIdToken !== 'function' || typeof createRealtimeCall !== 'function') {
     throw new TypeError('Authentication and realtime dependencies are required');
   }
@@ -30,7 +31,8 @@ export function createApp({ verifyIdToken, createRealtimeCall, limiter = createI
     try {
       const input = validateBody(req.body);
       const instructions = buildInstructions(input);
-      const answer = await createRealtimeCall({ sdp: input.sdp, instructions });
+      const voice = selectVoice(input, voicePools);
+      const answer = await createRealtimeCall({ sdp: input.sdp, instructions, voice });
       if (typeof answer !== 'string' || answer.trim() === '') throw new Error('Empty SDP answer');
       return res.type('application/sdp').send(answer);
     } catch (error) {

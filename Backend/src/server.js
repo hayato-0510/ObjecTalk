@@ -8,6 +8,7 @@ const config = loadEnvironment();
 initializeApp({ credential: applicationDefault(), projectId: config.firebaseProjectId });
 const app = createApp({
   verifyIdToken: createFirebaseTokenVerifier(),
+  voicePools: config.voicePools,
   createRealtimeCall: createOpenAIRealtimeCall({
     apiKey: config.openAiApiKey,
     model: config.model,

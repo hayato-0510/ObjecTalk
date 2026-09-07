@@ -83,6 +83,20 @@ test('returns SDP only after authentication and validation', async () => {
   });
 });
 
+test('selects a feminine voice for an object name ending in chan', async () => {
+  let upstreamInput;
+  await withServer(dependencies({ createRealtimeCall: async (input) => { upstreamInput = input; return 'v=0\r\nanswer'; } }), async (base) => {
+    const response = await fetch(`${base}/api/realtime/calls`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer valid-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validBody, objectName: 'りんごちゃん' }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.ok(['marin', 'coral', 'shimmer'].includes(upstreamInput.voice));
+  });
+});
+
 test('rejects invalid input without calling upstream', async () => {
   let calls = 0;
   await withServer(dependencies({ createRealtimeCall: async () => { calls++; return 'answer'; } }), async (base) => {

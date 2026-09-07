@@ -23,9 +23,18 @@ OPENAI_API_KEY=your-key
 FIREBASE_PROJECT_ID=your-project-id
 GOOGLE_APPLICATION_CREDENTIALS=C:\absolute\path\to\service-account.json
 PORT=8080
-OPENAI_REALTIME_MODEL=gpt-realtime
+OPENAI_REALTIME_MODEL=gpt-realtime-2.1
 OPENAI_REALTIME_VOICE=marin
+OPENAI_REALTIME_FEMININE_VOICES=marin,coral,shimmer
+OPENAI_REALTIME_MASCULINE_VOICES=cedar,ash,echo
+OPENAI_REALTIME_NEUTRAL_VOICES=alloy,sage,verse,ballad
 ```
+
+会話開始時の声は物体名と物体IDから決定します。名前が「ちゃん」で終わる場合は
+`OPENAI_REALTIME_FEMININE_VOICES`、「くん」で終わる場合は
+`OPENAI_REALTIME_MASCULINE_VOICES`、それ以外は
+`OPENAI_REALTIME_NEUTRAL_VOICES`から選ばれます。同じ物体IDには常に同じ声が割り当てられます。
+OpenAIは組み込み音声に性別を付けていないため、この分類はObjecTalk側の運用上の設定です。
 
 ローカル用コマンドは`.env`を読み込んで起動します。
 
