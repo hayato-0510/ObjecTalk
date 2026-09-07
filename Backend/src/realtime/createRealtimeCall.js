@@ -32,7 +32,7 @@ export function createOpenAIRealtimeCall({ apiKey, model, voice, fetchImpl = fet
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      console.error('[TalkDiag] OpenAI', response.status, detail.slice(0, 800));
+      console.error('OpenAI realtime call failed:', response.status, detail.slice(0, 500));
       const failure = new Error('OpenAI Realtime call failed');
       if (isQuotaExhausted(response.status, detail)) {
         failure.code = 'insufficient_quota';

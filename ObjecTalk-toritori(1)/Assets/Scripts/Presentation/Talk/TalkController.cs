@@ -44,7 +44,6 @@ namespace ObjecTalk.Presentation.Talk
 
         private void Awake()
         {
-            Debug.Log($"[TalkDiag] TalkController.Awake on '{gameObject.name}' (activeInHierarchy={gameObject.activeInHierarchy})");
             if (coordinator == null)
             {
                 ComposeRuntimeGraph();
@@ -55,6 +54,7 @@ namespace ObjecTalk.Presentation.Talk
         {
             Interlocked.Exchange(ref stopRequested, 0);
             Subscribe();
+            ShowPushToTalkButton(false);
         }
 
         private void Update()
@@ -104,6 +104,10 @@ namespace ObjecTalk.Presentation.Talk
 
         private void OnDisable()
         {
+            // Hide first: Unsubscribe drops the state handler, so the Idle transition from the stop
+            // below would not reach OnStateChanged to hide the button (it lives on the Canvas, not
+            // under this panel, so it does not deactivate with us).
+            ShowPushToTalkButton(false);
             Unsubscribe();
             RequestStop(ConversationStopReason.UserRequested);
         }
@@ -149,16 +153,15 @@ namespace ObjecTalk.Presentation.Talk
             if (recognitionSource == null || configuration == null || view == null)
             {
                 Debug.LogError(
-                    $"[TalkDiag] ComposeRuntimeGraph aborted: recognitionSource={(recognitionSource == null ? "NULL" : "ok")} " +
-                    $"configuration={(configuration == null ? "NULL" : "ok")} view={(view == null ? "NULL" : "ok")} " +
-                    $"recognitionSourceBehaviour={(recognitionSourceBehaviour == null ? "NULL" : recognitionSourceBehaviour.GetType().Name)}");
+                    "TalkController is missing a serialized reference " +
+                    $"(recognitionSource={(recognitionSource == null ? "NULL" : "ok")}, " +
+                    $"configuration={(configuration == null ? "NULL" : "ok")}, view={(view == null ? "NULL" : "ok")}).");
                 enabled = false;
                 return;
             }
 
             try
             {
-                Debug.Log($"[TalkDiag] ComposeRuntimeGraph: backendBaseUrl={configuration.ResolveBackendBaseUrl()}");
                 database = new DatabaseManager();
                 var repository = new ConversationObjectRepository(database, () => recognitionSource.CurrentUserId);
                 var callClient = new RealtimeCallClient(
@@ -184,11 +187,10 @@ namespace ObjecTalk.Presentation.Talk
                     configuration.RecognitionLossGrace,
                     configuration.ObjectSwitchConfirmation);
                 SetUpPushToTalk();
-                Debug.Log("[TalkDiag] ComposeRuntimeGraph succeeded");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[TalkDiag] ComposeRuntimeGraph threw: {ex}");
+                Debug.LogError($"TalkController failed to initialise the conversation graph: {ex}");
                 view.ShowFailure(new ConversationFailure("talk_initialization_failed", false, "音声会話を初期化できませんでした。"));
                 enabled = false;
             }
@@ -215,18 +217,16 @@ namespace ObjecTalk.Presentation.Talk
 
             if (pushToTalkButton == null)
             {
-                Debug.LogWarning("[TalkDiag] push-to-talk is on but no button could be set up; the mic will stay closed");
+                Debug.LogWarning("Push-to-talk is enabled but no button could be set up; the microphone will stay closed.");
                 return;
             }
 
-            Debug.Log("[TalkDiag] push-to-talk button ready");
             pushToTalkButton.HeldChanged += OnPushToTalkHeldChanged;
             ShowPushToTalkButton(false);
         }
 
         private void OnPushToTalkHeldChanged(bool held)
         {
-            Debug.Log($"[TalkDiag] push-to-talk {(held ? "HELD" : "released")}");
             voiceService?.SetPushToTalkActive(held);
 
             if (pushToTalkImage != null)
@@ -254,7 +254,7 @@ namespace ObjecTalk.Presentation.Talk
             var canvas = view != null ? view.GetComponentInParent<Canvas>() : null;
             if (canvas == null)
             {
-                canvas = FindObjectOfType<Canvas>();
+                canvas = FindAnyObjectByType<Canvas>();
             }
 
             if (canvas == null)
@@ -337,7 +337,6 @@ namespace ObjecTalk.Presentation.Talk
             dedicated.spatialize = false;
             dedicated.spatialBlend = 0f;
             remoteAudioSource = dedicated;
-            Debug.Log("[TalkDiag] ResolveRemoteAudioSource: moved remote playback to dedicated child GameObject");
             return dedicated;
         }
 
@@ -345,15 +344,9 @@ namespace ObjecTalk.Presentation.Talk
         {
             if (subscribed || recognitionSource == null || coordinator == null || voiceService == null)
             {
-                Debug.Log(
-                    $"[TalkDiag] Subscribe skipped: subscribed={subscribed} " +
-                    $"recognitionSource={(recognitionSource == null ? "NULL" : "ok")} " +
-                    $"coordinator={(coordinator == null ? "NULL" : "ok")} " +
-                    $"voiceService={(voiceService == null ? "NULL" : "ok")}");
                 return;
             }
 
-            Debug.Log("[TalkDiag] Subscribe: wired recognition + voice events");
             recognitionSource.RecognitionChanged += OnRecognitionChanged;
             coordinator.FailureOccurred += OnFailure;
             voiceService.StateChanged += OnStateChanged;
@@ -383,7 +376,6 @@ namespace ObjecTalk.Presentation.Talk
 
         private async void OnRecognitionChanged(RecognizedObjectState state)
         {
-            Debug.Log($"[TalkDiag] OnRecognitionChanged: recognized={state?.IsRecognized} id='{state?.ObjectId}' name='{state?.ObjectName}'");
             if (state != null && state.IsRecognized)
             {
                 view.SetCurrentObjectName(state.ObjectName);
@@ -440,7 +432,6 @@ namespace ObjecTalk.Presentation.Talk
 
         private void OnStateChanged(ConversationState state)
         {
-            Debug.Log($"[TalkDiag] ConversationState -> {state}");
             if (state == ConversationState.Idle)
             {
                 conversationActiveSince = -1f;
@@ -460,11 +451,7 @@ namespace ObjecTalk.Presentation.Talk
 
         private void OnTranscriptReceived(string transcript) => view?.ShowTranscript(transcript);
 
-        private void OnFailure(ConversationFailure failure)
-        {
-            Debug.LogWarning($"[TalkDiag] Failure: code={failure?.Code} retryable={failure?.IsRetryable} message={failure?.UserMessage}");
-            view?.ShowFailure(failure);
-        }
+        private void OnFailure(ConversationFailure failure) => view?.ShowFailure(failure);
         private void OnSceneUnloaded(Scene scene) => RequestStop(ConversationStopReason.UserRequested);
 
         private sealed class SystemClock : IClock

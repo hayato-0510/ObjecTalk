@@ -207,13 +207,10 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 resources = _current;
             }
 
-            bool applied = resources != null && !resources.Disposed && resources.LocalTrack != null;
-            if (applied)
+            if (resources != null && !resources.Disposed)
             {
-                resources.LocalTrack.SetEnabled(enabled);
+                resources.LocalTrack?.SetEnabled(enabled);
             }
-
-            UnityEngine.Debug.Log($"[TalkDiag] transport mic capture -> {enabled} (applied={applied})");
         }
 
         public async Task DisconnectAsync(CancellationToken cancellationToken)
