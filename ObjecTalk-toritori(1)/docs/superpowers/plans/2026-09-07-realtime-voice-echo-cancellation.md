@@ -1,5 +1,13 @@
 # Realtime Voice — Acoustic Echo Cancellation Plan
 
+> **STATUS 2026-09-08: mostly SUPERSEDED.** Push-to-talk (this plan's Task 4) shipped as the
+> open-campus exhibition path (`TalkConfiguration.handsFree = false`, commits `bac1d23` / `62bc774`)
+> and eliminates the echo self-loop structurally on device — the mic is closed unless the button is
+> held. Task 1 (`MODE_IN_COMMUNICATION`) and Task 3 (JNI `AcousticEchoCanceler` plugin) are only
+> needed if hands-free on the phone speaker becomes a hard requirement again. The software
+> mitigations (`output_audio_buffer`-driven muting, VAD 0.8) are still in place and still used by
+> the hands-free path. Kept for if/when hands-free returns.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans. This plan needs on-device iteration — every task ends with a Samsung SC-03L check, not just a passing test.
 
 **Goal:** Stop the assistant's own voice (played through the device speaker) from re-entering the microphone and being treated as user speech by server-side VAD, so a hands-free conversation does not talk to itself and the user can barge in.
