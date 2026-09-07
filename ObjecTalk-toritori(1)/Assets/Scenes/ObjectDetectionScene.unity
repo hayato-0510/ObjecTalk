@@ -10172,6 +10172,7 @@ MonoBehaviour:
   microphoneSource: {fileID: 1996260495}
   remoteAudioSource: {fileID: 1996260494}
   pushToTalkButton: {fileID: 0}
+  faceOverlayAnimator: {fileID: 1996260498}
 --- !u!82 &1996260494
 AudioSource:
   m_ObjectHideFlags: 0
@@ -10402,6 +10403,29 @@ MonoBehaviour:
   exhibitionMode: 1
   handsFree: 0
   sessionMaxSeconds: 120
+--- !u!114 &1996260498
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1996260491}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0c15133436977824c94bc6fb53335fb0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  eyeImage: {fileID: 1113944177}
+  mouthImage: {fileID: 1273203332}
+  mouthClosedScaleY: 0.35
+  mouthOpenScaleY: 1.15
+  mouthGain: 12
+  mouthNoiseFloor: 0.01
+  mouthResponse: 20
+  blinkIntervalMin: 2.5
+  blinkIntervalMax: 6
+  blinkDuration: 0.09
+  blinkClosedScaleY: 0.06
 --- !u!1 &2009800983
 GameObject:
   m_ObjectHideFlags: 0
