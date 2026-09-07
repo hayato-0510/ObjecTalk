@@ -90,6 +90,12 @@ npm test
 npm audit --omit=dev
 ```
 
+`npm audit` は `firebase-admin` の推移的依存（`@google-cloud/storage` / `-firestore` →
+`teeny-request` / `uuid`）にmoderate 8件を報告します。このバックエンドは
+`firebase-admin` を `verifyIdToken` にしか使わず Firestore / Storage 経路も
+`uuid` の `buf` 引数も通らないため、現時点で悪用可能な経路はありません。公開デプロイ前に
+`npm update firebase-admin` と、必要なら `package.json` の `overrides` で解消してください。
+
 実機確認では、音声や文字起こしをログへ残さず、端末名とOS、結果だけを記録します。
 
 | 確認項目 | 状態 |
