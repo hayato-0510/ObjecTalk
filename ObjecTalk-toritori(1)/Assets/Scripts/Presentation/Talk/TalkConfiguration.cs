@@ -13,10 +13,25 @@ namespace ObjecTalk.Presentation.Talk
         [SerializeField] private string language = "ja";
         [SerializeField] private bool debugLogging;
 
+        [Header("Open-campus exhibition")]
+        [Tooltip("鈴鹿高専 電子情報工学科のオープンキャンパス用。バックエンドに mode=exhibition を送り、" +
+                 "案内役ペルソナと学科の事実を会話に足す。")]
+        [SerializeField] private bool exhibitionMode;
+
+        [Tooltip("オン（既定）: ハンズフリー。オフ: プッシュトゥトーク（「話す」ボタンを押している間だけマイクが入る）。" +
+                 "騒がしい会場やエコーが強い環境ではオフにする。")]
+        [SerializeField] private bool handsFree = true;
+
+        [Tooltip("1組あたりの会話の上限秒数。0 で無制限。展示で回転と料金を管理したいとき使う。")]
+        [SerializeField] private float sessionMaxSeconds;
+
         public TimeSpan RecognitionLossGrace => TimeSpan.FromSeconds(recognitionLossGraceSeconds);
         public TimeSpan ObjectSwitchConfirmation => TimeSpan.FromSeconds(objectSwitchConfirmationSeconds);
         public string Language => string.IsNullOrWhiteSpace(language) ? "ja" : language.Trim();
         public bool DebugLogging => debugLogging;
+        public bool ExhibitionMode => exhibitionMode;
+        public bool HandsFree => handsFree;
+        public float SessionMaxSeconds => Mathf.Max(0f, sessionMaxSeconds);
 
         public string ResolveBackendBaseUrl()
         {

@@ -113,13 +113,14 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         private readonly IIdTokenProvider _tokenProvider;
         private readonly IRealtimeHttpClient _httpClient;
         private readonly TimeSpan _requestTimeout;
+        private readonly bool _exhibitionMode;
 
-        public RealtimeCallClient(string backendBaseUrl, IIdTokenProvider tokenProvider, IRealtimeHttpClient httpClient)
-            : this(backendBaseUrl, tokenProvider, httpClient, DefaultRequestTimeout)
+        public RealtimeCallClient(string backendBaseUrl, IIdTokenProvider tokenProvider, IRealtimeHttpClient httpClient, bool exhibitionMode = false)
+            : this(backendBaseUrl, tokenProvider, httpClient, DefaultRequestTimeout, exhibitionMode)
         {
         }
 
-        public RealtimeCallClient(string backendBaseUrl, IIdTokenProvider tokenProvider, IRealtimeHttpClient httpClient, TimeSpan requestTimeout)
+        public RealtimeCallClient(string backendBaseUrl, IIdTokenProvider tokenProvider, IRealtimeHttpClient httpClient, TimeSpan requestTimeout, bool exhibitionMode = false)
         {
             _backendBaseUrl = backendBaseUrl;
             _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
@@ -130,6 +131,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             }
 
             _requestTimeout = requestTimeout;
+            _exhibitionMode = exhibitionMode;
         }
 
         public async Task<string> ExchangeSdpAsync(string localSdp, ConversationContext context, CancellationToken cancellationToken)
@@ -225,7 +227,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             return new Uri(new Uri(basePath, UriKind.Absolute), "api/realtime/calls");
         }
 
-        private static string CreateRequestBody(string localSdp, ConversationContext context)
+        private string CreateRequestBody(string localSdp, ConversationContext context)
         {
             var payload = new JObject
             {
@@ -235,6 +237,11 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 ["language"] = context.Language,
                 ["sdp"] = localSdp
             };
+            if (_exhibitionMode)
+            {
+                payload["mode"] = "exhibition";
+            }
+
             return payload.ToString(Newtonsoft.Json.Formatting.None);
         }
 

@@ -2,6 +2,7 @@ import { initializeApp, applicationDefault } from 'firebase-admin/app';
 import { createApp } from './app.js';
 import { createFirebaseTokenVerifier } from './auth/firebaseAuth.js';
 import { loadEnvironment } from './config/environment.js';
+import { createDailyBudget } from './rateLimit/dailyBudget.js';
 import { createOpenAIRealtimeCall } from './realtime/createRealtimeCall.js';
 
 const config = loadEnvironment();
@@ -9,6 +10,10 @@ initializeApp({ credential: applicationDefault(), projectId: config.firebaseProj
 const app = createApp({
   verifyIdToken: createFirebaseTokenVerifier(),
   voicePools: config.voicePools,
+  dailyBudget: createDailyBudget({
+    maxMinutes: config.exhibitionDailyBudgetMinutes,
+    minutesPerSession: config.exhibitionMinutesPerSession,
+  }),
   createRealtimeCall: createOpenAIRealtimeCall({
     apiKey: config.openAiApiKey,
     model: config.model,

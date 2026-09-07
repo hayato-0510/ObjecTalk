@@ -3,10 +3,17 @@ import { extractBearerToken } from './auth/firebaseAuth.js';
 import { buildInstructions } from './conversation/buildInstructions.js';
 import { selectVoice } from './conversation/selectVoice.js';
 import { createInMemoryLimiter } from './rateLimit/inMemoryLimiter.js';
+import { createDailyBudget } from './rateLimit/dailyBudget.js';
 
 const MAX_SDP_LENGTH = 200_000;
 
-export function createApp({ verifyIdToken, createRealtimeCall, voicePools, limiter = createInMemoryLimiter() }) {
+export function createApp({
+  verifyIdToken,
+  createRealtimeCall,
+  voicePools,
+  limiter = createInMemoryLimiter(),
+  dailyBudget = createDailyBudget(),
+}) {
   if (typeof verifyIdToken !== 'function' || typeof createRealtimeCall !== 'function') {
     throw new TypeError('Authentication and realtime dependencies are required');
   }
@@ -37,6 +44,10 @@ export function createApp({ verifyIdToken, createRealtimeCall, voicePools, limit
     }
     console.error('[TalkDiag] auth OK uid=', identity.uid);
     if (!limiter(identity.uid, req.ip ?? 'unknown')) return res.status(429).json({ error: 'rate_limited' });
+    if (!dailyBudget.tryConsume()) {
+      console.error('[TalkDiag] daily exhibition budget spent');
+      return res.status(402).json({ error: 'daily_budget_exhausted' });
+    }
     try {
       const input = validateBody(req.body);
       console.error('[TalkDiag] body ok objectName=', input.objectName, 'sdpLen=', input.sdp.length, 'sdpHasAudio=', input.sdp.includes('m=audio'));
@@ -84,7 +95,9 @@ function validateBody(body) {
   const language = bounded(body.language, 'language', 2, 10);
   if (language !== 'ja') throw new RangeError('language');
   const sdp = rawBounded(body.sdp, 'sdp', 1, MAX_SDP_LENGTH);
-  return { objectId, objectName, personalityPrompt, language, sdp };
+  const mode = body.mode ?? undefined;
+  if (mode !== undefined && mode !== 'exhibition') throw new RangeError('mode');
+  return { objectId, objectName, personalityPrompt, language, sdp, mode };
 }
 
 function bounded(value, field, min, max) {

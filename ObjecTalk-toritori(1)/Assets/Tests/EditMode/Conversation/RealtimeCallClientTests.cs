@@ -44,6 +44,19 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That((string)body["personalityPrompt"], Is.EqualTo("丁寧に \"話す\""));
             Assert.That((string)body["language"], Is.EqualTo("ja"));
             Assert.That((string)body["sdp"], Is.EqualTo(LocalSdp));
+            Assert.That(body.ContainsKey("mode"), Is.False, "mode is omitted unless exhibition mode is on");
+        }
+
+        [Test]
+        public async Task ExchangeSdpAsync_ExhibitionMode_AddsModeFieldToTheRequestBody()
+        {
+            var httpClient = new FakeHttpClient(new RealtimeHttpResponse(200, "application/sdp", "answer"));
+            var client = new RealtimeCallClient("https://backend.example", new FakeTokenProvider("firebase-token"), httpClient, exhibitionMode: true);
+
+            await client.ExchangeSdpAsync(LocalSdp, Context, CancellationToken.None);
+
+            JObject body = JObject.Parse(httpClient.Request.Body);
+            Assert.That((string)body["mode"], Is.EqualTo("exhibition"));
         }
 
         [Test]

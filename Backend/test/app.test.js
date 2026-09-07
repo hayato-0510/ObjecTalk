@@ -83,6 +83,32 @@ test('returns SDP only after authentication and validation', async () => {
   });
 });
 
+test('exhibition mode reaches the instructions builder', async () => {
+  let upstreamInput;
+  await withServer(dependencies({ createRealtimeCall: async (input) => { upstreamInput = input; return 'v=0\r\nanswer'; } }), async (base) => {
+    const response = await fetch(`${base}/api/realtime/calls`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer valid-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validBody, mode: 'exhibition' }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(upstreamInput.instructions, /電子情報工学科/);
+  });
+});
+
+test('rejects an unknown mode without calling upstream', async () => {
+  let calls = 0;
+  await withServer(dependencies({ createRealtimeCall: async () => { calls++; return 'answer'; } }), async (base) => {
+    const response = await fetch(`${base}/api/realtime/calls`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validBody, mode: 'party' }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(calls, 0);
+  });
+});
+
 test('selects a feminine voice for an object name ending in chan', async () => {
   let upstreamInput;
   await withServer(dependencies({ createRealtimeCall: async (input) => { upstreamInput = input; return 'v=0\r\nanswer'; } }), async (base) => {
@@ -106,6 +132,19 @@ test('rejects invalid input without calling upstream', async () => {
       });
       assert.equal(response.status, 400);
     }
+    assert.equal(calls, 0);
+  });
+});
+
+test('returns 402 once the daily exhibition budget is spent', async () => {
+  let calls = 0;
+  const dailyBudget = { tryConsume: () => false };
+  await withServer(dependencies({ dailyBudget, createRealtimeCall: async () => { calls++; return 'answer'; } }), async (base) => {
+    const response = await fetch(`${base}/api/realtime/calls`, {
+      method: 'POST', headers: { authorization: 'Bearer token', 'content-type': 'application/json' }, body: JSON.stringify(validBody),
+    });
+    assert.equal(response.status, 402);
+    assert.deepEqual(await response.json(), { error: 'daily_budget_exhausted' });
     assert.equal(calls, 0);
   });
 });

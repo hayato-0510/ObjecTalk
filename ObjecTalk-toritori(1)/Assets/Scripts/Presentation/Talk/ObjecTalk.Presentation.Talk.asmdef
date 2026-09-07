@@ -6,7 +6,8 @@
     "ObjecTalk.Core.Conversation",
     "ObjecTalk.Infrastructure.Conversation",
     "ObjecTalk.Database",
-    "Unity.TextMeshPro"
+    "Unity.TextMeshPro",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

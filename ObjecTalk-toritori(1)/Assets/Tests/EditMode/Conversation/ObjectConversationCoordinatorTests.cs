@@ -285,6 +285,8 @@ namespace ObjecTalk.Tests.EditMode
             public bool YieldDuringStart { get; set; }
             public ConversationState CurrentState { get; private set; }
 
+            public void SetPushToTalkActive(bool active) => OperationLog.Add($"push-to-talk:{active}");
+
             public async Task StartAsync(ConversationContext context, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();

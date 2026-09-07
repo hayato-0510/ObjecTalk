@@ -24,6 +24,8 @@ namespace ObjecTalk.Presentation.Talk
         [SerializeField] private TalkView view;
         [SerializeField] private AudioSource microphoneSource;
         [SerializeField] private AudioSource remoteAudioSource;
+        [Tooltip("Optional. Push-to-talk mode uses this if set; otherwise a hold button is created at runtime.")]
+        [SerializeField] private PushToTalkButton pushToTalkButton;
 
         private IRecognitionObservationSource recognitionSource;
         private ObjectConversationCoordinator coordinator;
@@ -32,6 +34,8 @@ namespace ObjecTalk.Presentation.Talk
         private bool subscribed;
         private bool tickRunning;
         private int stopRequested;
+        private GameObject runtimePushToTalkButton;
+        private float conversationActiveSince = -1f;
 
         private void Awake()
         {
@@ -53,6 +57,25 @@ namespace ObjecTalk.Presentation.Talk
             if (!tickRunning && coordinator != null)
             {
                 TickAsync();
+            }
+
+            EnforceSessionTimeLimit();
+        }
+
+        // Exhibition guard: cap one visitor's conversation so the booth keeps moving and the daily
+        // budget lasts. 0 = off.
+        private void EnforceSessionTimeLimit()
+        {
+            if (configuration == null || configuration.SessionMaxSeconds <= 0f || conversationActiveSince < 0f)
+            {
+                return;
+            }
+
+            if (Time.realtimeSinceStartup - conversationActiveSince > configuration.SessionMaxSeconds)
+            {
+                conversationActiveSince = -1f;
+                view?.ShowFailure(new ConversationFailure("talk_session_time_limit", true, "体験時間になりました。次の人にかわってね。"));
+                RequestStop(ConversationStopReason.UserRequested);
             }
         }
 
@@ -84,6 +107,16 @@ namespace ObjecTalk.Presentation.Talk
         {
             Unsubscribe();
             RequestStop(ConversationStopReason.UserRequested);
+            if (pushToTalkButton != null)
+            {
+                pushToTalkButton.HeldChanged -= OnPushToTalkHeldChanged;
+            }
+
+            if (runtimePushToTalkButton != null)
+            {
+                Destroy(runtimePushToTalkButton);
+            }
+
             database?.Dispose();
             database = null;
         }
@@ -126,7 +159,8 @@ namespace ObjecTalk.Presentation.Talk
                 var callClient = new RealtimeCallClient(
                     configuration.ResolveBackendBaseUrl(),
                     new FirebaseIdTokenProvider(),
-                    new UnityWebRequestRealtimeHttpClient());
+                    new UnityWebRequestRealtimeHttpClient(),
+                    configuration.ExhibitionMode);
                 var transport = new RealtimeWebRtcTransport(
                     new UnityWebRtcPeerConnectionAdapter(),
                     new RealtimeCallSdpExchange(callClient),
@@ -136,13 +170,15 @@ namespace ObjecTalk.Presentation.Talk
                     new ConversationStateMachine(),
                     new MicrophonePermissionService(),
                     transport,
-                    new TaskDelayProvider());
+                    new TaskDelayProvider(),
+                    pushToTalk: !configuration.HandsFree);
                 coordinator = new ObjectConversationCoordinator(
                     new SystemClock(),
                     repository,
                     voiceService,
                     configuration.RecognitionLossGrace,
                     configuration.ObjectSwitchConfirmation);
+                SetUpPushToTalk();
                 Debug.Log("[TalkDiag] ComposeRuntimeGraph succeeded");
             }
             catch (Exception ex)
@@ -151,6 +187,103 @@ namespace ObjecTalk.Presentation.Talk
                 view.ShowFailure(new ConversationFailure("talk_initialization_failed", false, "音声会話を初期化できませんでした。"));
                 enabled = false;
             }
+        }
+
+        // Push-to-talk mode: the microphone is closed unless a hold button is pressed. Use a button
+        // wired in the scene if one is set, otherwise build a plain full-width one at the bottom so
+        // the mode works with no scene edit.
+        private void SetUpPushToTalk()
+        {
+            if (configuration.HandsFree || voiceService == null)
+            {
+                return;
+            }
+
+            if (pushToTalkButton == null)
+            {
+                pushToTalkButton = CreateRuntimePushToTalkButton();
+                if (pushToTalkButton != null)
+                {
+                    runtimePushToTalkButton = pushToTalkButton.gameObject;
+                }
+            }
+
+            if (pushToTalkButton == null)
+            {
+                Debug.LogWarning("[TalkDiag] push-to-talk is on but no button could be set up; the mic will stay closed");
+                return;
+            }
+
+            pushToTalkButton.HeldChanged += OnPushToTalkHeldChanged;
+        }
+
+        private void OnPushToTalkHeldChanged(bool held) => voiceService?.SetPushToTalkActive(held);
+
+        private PushToTalkButton CreateRuntimePushToTalkButton()
+        {
+            var canvas = view != null ? view.GetComponentInParent<Canvas>() : null;
+            if (canvas == null)
+            {
+                canvas = FindObjectOfType<Canvas>();
+            }
+
+            if (canvas == null)
+            {
+                return null;
+            }
+
+            if (canvas.GetComponent<UnityEngine.UI.GraphicRaycaster>() == null)
+            {
+                canvas.gameObject.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+            }
+
+            if (UnityEngine.EventSystems.EventSystem.current == null)
+            {
+                var es = new GameObject("EventSystem",
+                    typeof(UnityEngine.EventSystems.EventSystem),
+                    typeof(UnityEngine.EventSystems.StandaloneInputModule));
+                es.transform.SetParent(canvas.transform.root, false);
+            }
+
+            var go = new GameObject("PushToTalkButton (runtime)",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(UnityEngine.UI.Image), typeof(PushToTalkButton));
+            var rect = (RectTransform)go.transform;
+            rect.SetParent(canvas.transform, false);
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(1f, 0f);
+            rect.pivot = new Vector2(0.5f, 0f);
+            rect.offsetMin = new Vector2(48f, 40f);
+            rect.offsetMax = new Vector2(-48f, 40f + 220f);
+            rect.SetAsLastSibling();
+
+            var image = go.GetComponent<UnityEngine.UI.Image>();
+            image.color = new Color(0.12f, 0.44f, 0.36f);
+            image.raycastTarget = true;
+
+            var labelGo = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer));
+            var labelRect = (RectTransform)labelGo.transform;
+            labelRect.SetParent(rect, false);
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
+            try
+            {
+                var label = labelGo.AddComponent<TMPro.TextMeshProUGUI>();
+                label.text = "おして話す";
+                label.alignment = TMPro.TextAlignmentOptions.Center;
+                label.enableAutoSizing = true;
+                label.fontSizeMin = 24f;
+                label.fontSizeMax = 72f;
+                label.color = Color.white;
+                label.raycastTarget = false;
+            }
+            catch (Exception)
+            {
+                // A missing TMP font must not stop the button working; it just has no label.
+            }
+
+            return go.GetComponent<PushToTalkButton>();
         }
 
         // Unity WebRTC binds one OnAudioFilterRead filter per AudioSource, so the microphone capture
@@ -276,6 +409,15 @@ namespace ObjecTalk.Presentation.Talk
         private void OnStateChanged(ConversationState state)
         {
             Debug.Log($"[TalkDiag] ConversationState -> {state}");
+            if (state == ConversationState.Idle)
+            {
+                conversationActiveSince = -1f;
+            }
+            else if (conversationActiveSince < 0f)
+            {
+                conversationActiveSince = Time.realtimeSinceStartup;
+            }
+
             view?.ShowState(state);
         }
 

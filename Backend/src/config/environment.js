@@ -7,12 +7,30 @@ export function loadEnvironment(env = process.env) {
   const model = optionalValidated(env.OPENAI_REALTIME_MODEL, 'gpt-realtime-2.1', MODEL_PATTERN, 'OPENAI_REALTIME_MODEL');
   const voice = optionalValidated(env.OPENAI_REALTIME_VOICE, 'marin', VOICE_PATTERN, 'OPENAI_REALTIME_VOICE');
   const port = parsePort(env.PORT ?? '8080');
+  const exhibitionDailyBudgetMinutes = optionalPositiveInt(env.EXHIBITION_DAILY_BUDGET_MINUTES, 'EXHIBITION_DAILY_BUDGET_MINUTES');
+  const exhibitionMinutesPerSession = optionalPositiveInt(env.EXHIBITION_MINUTES_PER_SESSION, 'EXHIBITION_MINUTES_PER_SESSION') ?? 3;
   const voicePools = Object.freeze({
     feminineVoices: optionalVoiceList(env.OPENAI_REALTIME_FEMININE_VOICES, ['marin', 'coral', 'shimmer'], 'OPENAI_REALTIME_FEMININE_VOICES'),
     masculineVoices: optionalVoiceList(env.OPENAI_REALTIME_MASCULINE_VOICES, ['cedar', 'ash', 'echo'], 'OPENAI_REALTIME_MASCULINE_VOICES'),
     neutralVoices: optionalVoiceList(env.OPENAI_REALTIME_NEUTRAL_VOICES, ['alloy', 'sage', 'verse', 'ballad'], 'OPENAI_REALTIME_NEUTRAL_VOICES'),
   });
-  return Object.freeze({ openAiApiKey, firebaseProjectId, model, voice, voicePools, port });
+  return Object.freeze({
+    openAiApiKey,
+    firebaseProjectId,
+    model,
+    voice,
+    voicePools,
+    port,
+    exhibitionDailyBudgetMinutes,
+    exhibitionMinutesPerSession,
+  });
+}
+
+function optionalPositiveInt(value, name) {
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const parsed = Number(value.trim());
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${name} is invalid`);
+  return parsed;
 }
 
 function required(value, name) {

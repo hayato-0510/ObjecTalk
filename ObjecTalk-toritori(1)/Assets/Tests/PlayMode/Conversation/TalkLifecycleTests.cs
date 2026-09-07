@@ -339,11 +339,14 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
         {
             public readonly List<string> StartedObjectIds = new List<string>();
             public readonly List<ConversationStopReason> StopReasons = new List<ConversationStopReason>();
+            public readonly List<bool> PushToTalkStates = new List<bool>();
             public ConversationState CurrentState { get; private set; } = ConversationState.Idle;
             public event Action<ConversationState> StateChanged;
             public event Action<string> UserTranscriptReceived { add { } remove { } }
             public event Action<string> AssistantTranscriptReceived { add { } remove { } }
             public event Action<ConversationFailure> ErrorOccurred { add { } remove { } }
+
+            public void SetPushToTalkActive(bool active) => PushToTalkStates.Add(active);
 
             public Task StartAsync(ConversationContext context, CancellationToken cancellationToken)
             {

@@ -12,6 +12,8 @@ test('loads validated defaults and port', () => {
   assert.equal(value.port, 9000);
   assert.equal(value.model, 'gpt-realtime-2.1');
   assert.equal(value.voice, 'marin');
+  assert.equal(value.exhibitionDailyBudgetMinutes, null);
+  assert.equal(value.exhibitionMinutesPerSession, 3);
   assert.deepEqual(value.voicePools, {
     feminineVoices: ['marin', 'coral', 'shimmer'],
     masculineVoices: ['cedar', 'ash', 'echo'],
@@ -42,4 +44,13 @@ test('rejects invalid model, voice, and port', () => {
   assert.throws(() => loadEnvironment({ ...base, OPENAI_REALTIME_VOICE: '../bad' }), /VOICE/);
   assert.throws(() => loadEnvironment({ ...base, OPENAI_REALTIME_FEMININE_VOICES: 'marin,../bad' }), /FEMININE_VOICES/);
   assert.throws(() => loadEnvironment({ ...base, OPENAI_REALTIME_MASCULINE_VOICES: ',' }), /MASCULINE_VOICES/);
+});
+
+test('reads the exhibition budget when configured and rejects a bad value', () => {
+  const base = { OPENAI_API_KEY: 'key', FIREBASE_PROJECT_ID: 'project' };
+  const value = loadEnvironment({ ...base, EXHIBITION_DAILY_BUDGET_MINUTES: '120', EXHIBITION_MINUTES_PER_SESSION: '2' });
+  assert.equal(value.exhibitionDailyBudgetMinutes, 120);
+  assert.equal(value.exhibitionMinutesPerSession, 2);
+  assert.throws(() => loadEnvironment({ ...base, EXHIBITION_DAILY_BUDGET_MINUTES: 'lots' }), /EXHIBITION_DAILY_BUDGET_MINUTES/);
+  assert.throws(() => loadEnvironment({ ...base, EXHIBITION_MINUTES_PER_SESSION: '-1' }), /EXHIBITION_MINUTES_PER_SESSION/);
 });

@@ -84,13 +84,18 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         private static readonly TimeSpan ResponseCancelErrorGrace = TimeSpan.FromSeconds(3);
         private long _responseCancelErrorSuppressedUntilTicks;
 
+        // Push-to-talk: microphone capture is driven solely by SetPushToTalkActive, and every
+        // automatic echo-guard mute/unmute is skipped.
+        private readonly bool _pushToTalk;
+
         public OpenAIRealtimeConversationService(
             ConversationStateMachine stateMachine,
             IMicrophonePermissionService microphonePermission,
             IRealtimeConversationTransport transport,
             IConversationDelayProvider delayProvider,
             TimeSpan? microphoneResumeGrace = null,
-            TimeSpan? microphoneResumeFallbackGrace = null)
+            TimeSpan? microphoneResumeFallbackGrace = null,
+            bool pushToTalk = false)
         {
             _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
             _microphonePermission = microphonePermission ?? throw new ArgumentNullException(nameof(microphonePermission));
@@ -98,9 +103,18 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             _delayProvider = delayProvider ?? throw new ArgumentNullException(nameof(delayProvider));
             _microphoneResumeGrace = microphoneResumeGrace ?? DefaultMicrophoneResumeGrace;
             _microphoneResumeFallbackGrace = microphoneResumeFallbackGrace ?? DefaultMicrophoneResumeFallbackGrace;
+            _pushToTalk = pushToTalk;
             if (_microphoneResumeGrace < TimeSpan.Zero || _microphoneResumeFallbackGrace < TimeSpan.Zero)
             {
                 throw new ArgumentOutOfRangeException(nameof(microphoneResumeGrace));
+            }
+        }
+
+        public void SetPushToTalkActive(bool active)
+        {
+            if (_pushToTalk)
+            {
+                TrySetTransportAudioCapture(active);
             }
         }
 
@@ -192,6 +206,12 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                         if (!IsActiveGeneration(generation))
                         {
                             return;
+                        }
+
+                        if (_pushToTalk)
+                        {
+                            // The talk button will open the microphone; it starts closed.
+                            TrySetTransportAudioCapture(false);
                         }
 
                         TryPublishState(ConversationState.Listening, generation);
@@ -435,14 +455,26 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
         private void SafeSetLocalAudioCaptureEnabled(bool enabled)
         {
+            // In push-to-talk the button is the sole authority over the microphone; the automatic
+            // echo-guard toggles must not fight it.
+            if (_pushToTalk)
+            {
+                return;
+            }
+
+            TrySetTransportAudioCapture(enabled);
+        }
+
+        private void TrySetTransportAudioCapture(bool enabled)
+        {
             try
             {
                 _transport.SetLocalAudioCaptureEnabled(enabled);
             }
             catch (Exception)
             {
-                // The mute toggle is a best-effort echo guard; a failure here must not derail the
-                // conversation, and there is nothing the user can do about it.
+                // Best-effort: a mute-toggle failure must not derail the conversation, and there is
+                // nothing the user can do about it.
             }
         }
 
@@ -460,6 +492,11 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
         private async void ScheduleMicrophoneResume(long generation, TimeSpan grace)
         {
+            if (_pushToTalk)
+            {
+                return;
+            }
+
             if (grace <= TimeSpan.Zero)
             {
                 if (IsActiveGeneration(generation) && CurrentState == ConversationState.Listening)

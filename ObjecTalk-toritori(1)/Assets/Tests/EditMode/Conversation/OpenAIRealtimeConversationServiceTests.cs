@@ -461,6 +461,58 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public async Task PushToTalk_ConnectLeavesTheMicrophoneClosed()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(), pushToTalk: true);
+
+            await service.StartAsync(Context, CancellationToken.None);
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false }));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+        }
+
+        [Test]
+        public async Task PushToTalk_ButtonHeldOpensTheMicrophoneAndReleaseClosesIt()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(), pushToTalk: true);
+            await service.StartAsync(Context, CancellationToken.None);
+
+            service.SetPushToTalkActive(true);
+            service.SetPushToTalkActive(false);
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false, true, false }));
+        }
+
+        [Test]
+        public async Task PushToTalk_SuppressesTheAutomaticEchoGuardToggles()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(), pushToTalk: true);
+            await service.StartAsync(Context, CancellationToken.None);
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.OutputAudioStopped, "output_audio_buffer.stopped", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseDone, "response.done", "", "", "", "", "", ""));
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false }), "only the connect-time close, no automatic mute/unmute");
+        }
+
+        [Test]
+        public async Task SetPushToTalkActive_IsIgnoredWhenNotInPushToTalkMode()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.LocalAudioCaptureToggles.Clear();
+
+            service.SetPushToTalkActive(true);
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.Empty);
+        }
+
+        [Test]
         public async Task ResponseStartedAfterBargeIn_ResumesRemotePlaybackForTheNewTurn()
         {
             var transport = new FakeTransport();
@@ -608,14 +660,16 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             IRealtimeConversationTransport transport,
             IConversationDelayProvider delay,
             TimeSpan? microphoneResumeGrace = null,
-            TimeSpan? microphoneResumeFallbackGrace = null)
+            TimeSpan? microphoneResumeFallbackGrace = null,
+            bool pushToTalk = false)
         {
             // Tests default both microphone-resume graces to zero so the resume is synchronous and
             // deterministic; the timing itself is covered by dedicated tests.
             return new OpenAIRealtimeConversationService(
                 new ConversationStateMachine(), permission, transport, delay,
                 microphoneResumeGrace ?? TimeSpan.Zero,
-                microphoneResumeFallbackGrace ?? TimeSpan.Zero);
+                microphoneResumeFallbackGrace ?? TimeSpan.Zero,
+                pushToTalk);
         }
 
         private static async Task AssertCanceledAsync(Func<Task> operation)
