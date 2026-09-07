@@ -16,6 +16,9 @@ test('sends server session and API key to the OpenAI endpoint', async () => {
   assert.equal(session.type, 'realtime');
   assert.deepEqual(session.output_modalities, ['audio']);
   assert.equal(session.audio.input.turn_detection.type, 'server_vad');
+  // Echo guard: the client has no AEC, so the assistant's own voice leaks into the mic.
+  assert.equal(session.audio.input.turn_detection.threshold, 0.8);
+  assert.equal(session.audio.input.turn_detection.silence_duration_ms, 1000);
   assert.equal(session.audio.output.voice, 'marin');
 });
 
@@ -33,6 +36,18 @@ test('uses the per-object voice selected for this realtime session', async () =>
 });
 
 test('does not expose upstream response body in failure', async () => {
-  const call = createOpenAIRealtimeCall({ apiKey: 'key', model: 'model', voice: 'voice', fetchImpl: async () => ({ ok: false, text: async () => 'SECRET' }) });
-  await assert.rejects(call({ sdp: 'offer', instructions: 'rules' }), (error) => !error.message.includes('SECRET'));
+  const call = createOpenAIRealtimeCall({ apiKey: 'key', model: 'model', voice: 'voice', fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'SECRET' }) });
+  await assert.rejects(call({ sdp: 'offer', instructions: 'rules' }), (error) => !error.message.includes('SECRET') && error.code === undefined);
+});
+
+test('tags an exhausted-credit 429 so the caller can stop retrying', async () => {
+  const body = JSON.stringify({ error: { type: 'insufficient_quota', code: 'credit_balance_exhausted', message: 'no credits' } });
+  const call = createOpenAIRealtimeCall({ apiKey: 'key', model: 'model', voice: 'voice', fetchImpl: async () => ({ ok: false, status: 429, text: async () => body }) });
+  await assert.rejects(call({ sdp: 'offer', instructions: 'rules' }), (error) => error.code === 'insufficient_quota');
+});
+
+test('leaves a transient 429 untagged so it stays retryable', async () => {
+  const body = JSON.stringify({ error: { type: 'rate_limit_exceeded', message: 'slow down' } });
+  const call = createOpenAIRealtimeCall({ apiKey: 'key', model: 'model', voice: 'voice', fetchImpl: async () => ({ ok: false, status: 429, text: async () => body }) });
+  await assert.rejects(call({ sdp: 'offer', instructions: 'rules' }), (error) => error.code === undefined);
 });

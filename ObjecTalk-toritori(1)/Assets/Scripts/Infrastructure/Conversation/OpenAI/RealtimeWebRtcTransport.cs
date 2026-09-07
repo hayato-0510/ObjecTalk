@@ -41,6 +41,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         void AttachTo(AudioSource audioSource);
 
         void Detach();
+
+        void SetEnabled(bool enabled);
     }
 
     public interface IRealtimeDataChannel : IDisposable
@@ -177,6 +179,38 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         public void StopRemotePlayback()
         {
             _remoteAudioSource?.Stop();
+        }
+
+        public void StartRemotePlayback()
+        {
+            ConnectionResources resources;
+            lock (_sync)
+            {
+                resources = _current;
+            }
+
+            if (_remoteAudioSource != null && resources != null && !resources.Disposed && resources.RemoteTrack != null)
+            {
+                _remoteAudioSource.loop = true;
+                if (!_remoteAudioSource.isPlaying)
+                {
+                    _remoteAudioSource.Play();
+                }
+            }
+        }
+
+        public void SetLocalAudioCaptureEnabled(bool enabled)
+        {
+            ConnectionResources resources;
+            lock (_sync)
+            {
+                resources = _current;
+            }
+
+            if (resources != null && !resources.Disposed)
+            {
+                resources.LocalTrack?.SetEnabled(enabled);
+            }
         }
 
         public async Task DisconnectAsync(CancellationToken cancellationToken)
@@ -485,6 +519,16 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                     // null. Stopping the AudioSource and disposing the track releases its renderer.
                     _remoteAudioSource.Stop();
                     _remoteAudioSource = null;
+                }
+            }
+
+            public void SetEnabled(bool enabled)
+            {
+                if (!_disposed)
+                {
+                    // A disabled MediaStreamTrack transmits silence, so the peer keeps the audio
+                    // transceiver alive while the local microphone is muted.
+                    _track.Enabled = enabled;
                 }
             }
 

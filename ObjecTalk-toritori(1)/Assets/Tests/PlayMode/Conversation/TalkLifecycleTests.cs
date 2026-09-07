@@ -196,6 +196,29 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
         }
 
         [UnityTest]
+        public IEnumerator TalkController_IgnoresPauseWhileRequestingMicrophonePermission()
+        {
+            var fixture = CreateTalkFixture();
+            fixture.Root.SetActive(true);
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+
+            // The OS permission dialog pauses the app while the service is still asking for the grant.
+            fixture.Voice.PublishState(ConversationState.RequestingPermission);
+            fixture.Root.SendMessage("OnApplicationPause", true);
+            yield return null;
+            yield return null;
+            Assert.That(fixture.Voice.StopReasons, Is.Empty);
+
+            // A pause in any other state still ends the conversation.
+            fixture.Voice.PublishState(ConversationState.Listening);
+            fixture.Root.SendMessage("OnApplicationPause", true);
+            yield return WaitUntil(() => fixture.Voice.StopReasons.Count == 1);
+            Assert.That(fixture.Voice.StopReasons.Single(), Is.EqualTo(ConversationStopReason.ApplicationPaused));
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
+        [UnityTest]
         public IEnumerator TalkController_DisableUnsubscribesAndStopsOnlyOnce()
         {
             var fixture = CreateTalkFixture();
@@ -460,11 +483,13 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
             {
                 public Func<bool> ThrowOnDetach;
                 public int DisposeCalls { get; private set; }
+                public readonly List<bool> EnabledToggles = new List<bool>();
                 public void AttachTo(UnityEngine.AudioSource audioSource) { }
                 public void Detach()
                 {
                     if (ThrowOnDetach?.Invoke() == true) throw new InvalidOperationException("detach failure");
                 }
+                public void SetEnabled(bool enabled) => EnabledToggles.Add(enabled);
                 public void Dispose() => DisposeCalls++;
             }
 

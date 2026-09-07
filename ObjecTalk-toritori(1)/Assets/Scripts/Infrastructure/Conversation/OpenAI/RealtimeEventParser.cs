@@ -79,6 +79,10 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                     return RealtimeEventKind.ResponseStarted;
                 case RealtimeEventTypes.ResponseDone:
                     return RealtimeEventKind.ResponseDone;
+                case RealtimeEventTypes.OutputAudioStarted:
+                    return RealtimeEventKind.OutputAudioStarted;
+                case RealtimeEventTypes.OutputAudioStopped:
+                    return RealtimeEventKind.OutputAudioStopped;
                 case RealtimeEventTypes.Error:
                     return RealtimeEventKind.ApiError;
                 default:

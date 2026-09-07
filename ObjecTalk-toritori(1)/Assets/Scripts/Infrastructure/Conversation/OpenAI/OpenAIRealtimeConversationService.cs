@@ -18,6 +18,14 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
         void StopRemotePlayback();
 
+        // Resumes the remote audio sink after a barge-in stopped it, so a later assistant turn on
+        // the same WebRTC track is audible again.
+        void StartRemotePlayback();
+
+        // Half-duplex echo guard: the microphone track is silenced while the assistant speaks so its
+        // own voice, played through the device speaker, cannot loop back and trip server-side VAD.
+        void SetLocalAudioCaptureEnabled(bool enabled);
+
         Task DisconnectAsync(CancellationToken cancellationToken);
     }
 
@@ -43,10 +51,22 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             TimeSpan.FromSeconds(4)
         };
 
+        // The client has no acoustic echo cancellation, so the microphone stays muted while the
+        // assistant is audible. It reopens this long after output_audio_buffer.stopped (the reply
+        // has actually finished leaving the speaker), leaving room only for the acoustic tail.
+        private static readonly TimeSpan DefaultMicrophoneResumeGrace = TimeSpan.FromMilliseconds(400);
+
+        // Fallback only: output_audio_buffer.stopped is a WebRTC event that should always arrive,
+        // but if it is ever dropped the mic must not stay muted forever, so response.done arms a
+        // slower resume as a safety net.
+        private static readonly TimeSpan DefaultMicrophoneResumeFallbackGrace = TimeSpan.FromMilliseconds(3000);
+
         private readonly ConversationStateMachine _stateMachine;
         private readonly IMicrophonePermissionService _microphonePermission;
         private readonly IRealtimeConversationTransport _transport;
         private readonly IConversationDelayProvider _delayProvider;
+        private readonly TimeSpan _microphoneResumeGrace;
+        private readonly TimeSpan _microphoneResumeFallbackGrace;
         private readonly SemaphoreSlim _operationGate = new SemaphoreSlim(1, 1);
         private readonly object _sync = new object();
         private readonly object _publishedEventsSync = new object();
@@ -57,16 +77,31 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         private int _lifecycleOperationCount;
         private int _isDispatchingPublishedEvents;
 
+        // When a barge-in makes us send response.cancel, the server may already have finished that
+        // response and answers with an "error" event ("cancellation failed: no active response").
+        // That race is benign, so an ApiError arriving within this window of our cancel is swallowed
+        // instead of shown to the user. UTC ticks; 0 means no cancel is outstanding.
+        private static readonly TimeSpan ResponseCancelErrorGrace = TimeSpan.FromSeconds(3);
+        private long _responseCancelErrorSuppressedUntilTicks;
+
         public OpenAIRealtimeConversationService(
             ConversationStateMachine stateMachine,
             IMicrophonePermissionService microphonePermission,
             IRealtimeConversationTransport transport,
-            IConversationDelayProvider delayProvider)
+            IConversationDelayProvider delayProvider,
+            TimeSpan? microphoneResumeGrace = null,
+            TimeSpan? microphoneResumeFallbackGrace = null)
         {
             _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
             _microphonePermission = microphonePermission ?? throw new ArgumentNullException(nameof(microphonePermission));
             _transport = transport ?? throw new ArgumentNullException(nameof(transport));
             _delayProvider = delayProvider ?? throw new ArgumentNullException(nameof(delayProvider));
+            _microphoneResumeGrace = microphoneResumeGrace ?? DefaultMicrophoneResumeGrace;
+            _microphoneResumeFallbackGrace = microphoneResumeFallbackGrace ?? DefaultMicrophoneResumeFallbackGrace;
+            if (_microphoneResumeGrace < TimeSpan.Zero || _microphoneResumeFallbackGrace < TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(microphoneResumeGrace));
+            }
         }
 
         public ConversationState CurrentState
@@ -330,6 +365,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
                         try
                         {
+                            ArmResponseCancelErrorSuppression();
                             ObserveCancellationFailure(_transport.CancelResponseAsync(CancellationToken.None));
                         }
                         catch (Exception)
@@ -341,6 +377,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                         finally
                         {
                             TryPublishState(ConversationState.Listening, generation);
+                            SafeSetLocalAudioCaptureEnabled(true);
                         }
                     }
                     break;
@@ -353,16 +390,100 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                     break;
                 case RealtimeEventKind.ResponseStarted:
                     TryPublishState(ConversationState.Speaking, generation);
+                    SafeSetLocalAudioCaptureEnabled(false);
+                    SafeStartRemotePlayback();
+                    break;
+                case RealtimeEventKind.OutputAudioStarted:
+                    SafeSetLocalAudioCaptureEnabled(false);
+                    SafeStartRemotePlayback();
+                    break;
+                case RealtimeEventKind.OutputAudioStopped:
+                    // The reply has finished leaving the speaker: reopen the mic after only the
+                    // short acoustic-tail grace.
+                    ScheduleMicrophoneResume(generation, _microphoneResumeGrace);
                     break;
                 case RealtimeEventKind.ResponseDone:
                     TryPublishState(ConversationState.Listening, generation);
+                    // Safety net in case output_audio_buffer.stopped never arrives.
+                    ScheduleMicrophoneResume(generation, _microphoneResumeFallbackGrace);
                     break;
                 case RealtimeEventKind.ApiError:
+                    if (ConsumeSuppressedResponseCancelError())
+                    {
+                        break;
+                    }
+
                     PublishFailure(new ConversationFailure(
                         "realtime_api_error",
                         false,
                         "音声会話で問題が発生しました。もう一度お試しください。"));
                     break;
+            }
+        }
+
+        private void ArmResponseCancelErrorSuppression()
+        {
+            long until = DateTimeOffset.UtcNow.Add(ResponseCancelErrorGrace).UtcTicks;
+            Interlocked.Exchange(ref _responseCancelErrorSuppressedUntilTicks, until);
+        }
+
+        private bool ConsumeSuppressedResponseCancelError()
+        {
+            long until = Interlocked.Exchange(ref _responseCancelErrorSuppressedUntilTicks, 0);
+            return until != 0 && DateTimeOffset.UtcNow.UtcTicks <= until;
+        }
+
+        private void SafeSetLocalAudioCaptureEnabled(bool enabled)
+        {
+            try
+            {
+                _transport.SetLocalAudioCaptureEnabled(enabled);
+            }
+            catch (Exception)
+            {
+                // The mute toggle is a best-effort echo guard; a failure here must not derail the
+                // conversation, and there is nothing the user can do about it.
+            }
+        }
+
+        private void SafeStartRemotePlayback()
+        {
+            try
+            {
+                _transport.StartRemotePlayback();
+            }
+            catch (Exception)
+            {
+                // Best-effort playback resume; a failure here must not derail the conversation.
+            }
+        }
+
+        private async void ScheduleMicrophoneResume(long generation, TimeSpan grace)
+        {
+            if (grace <= TimeSpan.Zero)
+            {
+                if (IsActiveGeneration(generation) && CurrentState == ConversationState.Listening)
+                {
+                    SafeSetLocalAudioCaptureEnabled(true);
+                }
+
+                return;
+            }
+
+            try
+            {
+                await _delayProvider.DelayAsync(grace, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // Fall through: a failed grace delay must not leave the microphone muted forever.
+            }
+
+            // Only reopen the microphone if this session is still the live one and the assistant has
+            // not started another turn in the meantime (that turn owns the mute).
+            if (IsActiveGeneration(generation) && CurrentState == ConversationState.Listening)
+            {
+                SafeSetLocalAudioCaptureEnabled(true);
             }
         }
 
@@ -455,6 +576,10 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                     return new ConversationFailure("realtime_timeout", true, "接続がタイムアウトしました。再接続しています。");
                 case RealtimeCallFailureKind.ServiceUnavailable:
                     return new ConversationFailure("realtime_service_unavailable", true, "音声会話サービスに接続できませんでした。再接続しています。");
+                case RealtimeCallFailureKind.QuotaExhausted:
+                    // Non-retryable on purpose: the OpenAI credit balance is exhausted, so the
+                    // reconnect loop would only burn time.
+                    return new ConversationFailure("realtime_quota_exhausted", false, "音声会話サービスをただいまご利用いただけません。");
                 default:
                     return new ConversationFailure("realtime_connection_failed", false, "音声会話に接続できませんでした。");
             }

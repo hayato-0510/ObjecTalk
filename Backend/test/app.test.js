@@ -132,6 +132,17 @@ test('sanitizes authentication and upstream failures', async () => {
   });
 });
 
+test('maps an exhausted OpenAI credit balance to 402 so the client stops retrying', async () => {
+  const quotaError = Object.assign(new Error('OpenAI Realtime call failed'), { code: 'insufficient_quota' });
+  await withServer(dependencies({ createRealtimeCall: async () => { throw quotaError; } }), async (base) => {
+    const response = await fetch(`${base}/api/realtime/calls`, {
+      method: 'POST', headers: { authorization: 'Bearer token', 'content-type': 'application/json' }, body: JSON.stringify(validBody),
+    });
+    assert.equal(response.status, 402);
+    assert.deepEqual(await response.json(), { error: 'quota_exhausted' });
+  });
+});
+
 function rawRequest(base, headers, body) {
   return new Promise((resolve, reject) => {
     const request = http.request(`${base}/api/realtime/calls`, { method: 'POST', headers }, (response) => {

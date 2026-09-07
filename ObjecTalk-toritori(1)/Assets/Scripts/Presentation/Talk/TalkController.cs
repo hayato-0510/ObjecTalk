@@ -35,6 +35,7 @@ namespace ObjecTalk.Presentation.Talk
 
         private void Awake()
         {
+            Debug.Log($"[TalkDiag] TalkController.Awake on '{gameObject.name}' (activeInHierarchy={gameObject.activeInHierarchy})");
             if (coordinator == null)
             {
                 ComposeRuntimeGraph();
@@ -57,10 +58,20 @@ namespace ObjecTalk.Presentation.Talk
 
         private void OnApplicationPause(bool paused)
         {
-            if (paused)
+            if (!paused)
             {
-                RequestStop(ConversationStopReason.ApplicationPaused);
+                return;
             }
+
+            // The OS microphone-permission dialog pauses the app while the first StartAsync is still
+            // awaiting the grant. Stopping here would cancel that start, and the grant would then
+            // race a teardown. A real background (any other state) still ends the conversation.
+            if (voiceService != null && voiceService.CurrentState == ConversationState.RequestingPermission)
+            {
+                return;
+            }
+
+            RequestStop(ConversationStopReason.ApplicationPaused);
         }
 
         private void OnDisable()
@@ -99,12 +110,17 @@ namespace ObjecTalk.Presentation.Talk
             recognitionSource = recognitionSourceBehaviour as IRecognitionObservationSource;
             if (recognitionSource == null || configuration == null || view == null)
             {
+                Debug.LogError(
+                    $"[TalkDiag] ComposeRuntimeGraph aborted: recognitionSource={(recognitionSource == null ? "NULL" : "ok")} " +
+                    $"configuration={(configuration == null ? "NULL" : "ok")} view={(view == null ? "NULL" : "ok")} " +
+                    $"recognitionSourceBehaviour={(recognitionSourceBehaviour == null ? "NULL" : recognitionSourceBehaviour.GetType().Name)}");
                 enabled = false;
                 return;
             }
 
             try
             {
+                Debug.Log($"[TalkDiag] ComposeRuntimeGraph: backendBaseUrl={configuration.ResolveBackendBaseUrl()}");
                 database = new DatabaseManager();
                 var repository = new ConversationObjectRepository(database, () => recognitionSource.CurrentUserId);
                 var callClient = new RealtimeCallClient(
@@ -115,7 +131,7 @@ namespace ObjecTalk.Presentation.Talk
                     new UnityWebRtcPeerConnectionAdapter(),
                     new RealtimeCallSdpExchange(callClient),
                     microphoneSource,
-                    remoteAudioSource);
+                    ResolveRemoteAudioSource());
                 voiceService = new OpenAIRealtimeConversationService(
                     new ConversationStateMachine(),
                     new MicrophonePermissionService(),
@@ -127,21 +143,52 @@ namespace ObjecTalk.Presentation.Talk
                     voiceService,
                     configuration.RecognitionLossGrace,
                     configuration.ObjectSwitchConfirmation);
+                Debug.Log("[TalkDiag] ComposeRuntimeGraph succeeded");
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Debug.LogError($"[TalkDiag] ComposeRuntimeGraph threw: {ex}");
                 view.ShowFailure(new ConversationFailure("talk_initialization_failed", false, "音声会話を初期化できませんでした。"));
                 enabled = false;
             }
+        }
+
+        // Unity WebRTC binds one OnAudioFilterRead filter per AudioSource, so the microphone capture
+        // track and the remote playback track cannot share a GameObject — the second one to attach
+        // is refused ("GameObject has multiple AudioSources ... AudioCustomFilter"). When the scene
+        // wires both fields to the same object, move remote playback onto a dedicated child.
+        private AudioSource ResolveRemoteAudioSource()
+        {
+            if (remoteAudioSource == null || microphoneSource == null ||
+                remoteAudioSource.gameObject != microphoneSource.gameObject)
+            {
+                return remoteAudioSource;
+            }
+
+            var host = new GameObject("RemoteConversationAudio");
+            host.transform.SetParent(transform, false);
+            var dedicated = host.AddComponent<AudioSource>();
+            dedicated.playOnAwake = false;
+            dedicated.spatialize = false;
+            dedicated.spatialBlend = 0f;
+            remoteAudioSource = dedicated;
+            Debug.Log("[TalkDiag] ResolveRemoteAudioSource: moved remote playback to dedicated child GameObject");
+            return dedicated;
         }
 
         private void Subscribe()
         {
             if (subscribed || recognitionSource == null || coordinator == null || voiceService == null)
             {
+                Debug.Log(
+                    $"[TalkDiag] Subscribe skipped: subscribed={subscribed} " +
+                    $"recognitionSource={(recognitionSource == null ? "NULL" : "ok")} " +
+                    $"coordinator={(coordinator == null ? "NULL" : "ok")} " +
+                    $"voiceService={(voiceService == null ? "NULL" : "ok")}");
                 return;
             }
 
+            Debug.Log("[TalkDiag] Subscribe: wired recognition + voice events");
             recognitionSource.RecognitionChanged += OnRecognitionChanged;
             coordinator.FailureOccurred += OnFailure;
             voiceService.StateChanged += OnStateChanged;
@@ -171,6 +218,7 @@ namespace ObjecTalk.Presentation.Talk
 
         private async void OnRecognitionChanged(RecognizedObjectState state)
         {
+            Debug.Log($"[TalkDiag] OnRecognitionChanged: recognized={state?.IsRecognized} id='{state?.ObjectId}' name='{state?.ObjectName}'");
             if (state != null && state.IsRecognized)
             {
                 view.SetCurrentObjectName(state.ObjectName);
@@ -225,9 +273,19 @@ namespace ObjecTalk.Presentation.Talk
             }
         }
 
-        private void OnStateChanged(ConversationState state) => view?.ShowState(state);
+        private void OnStateChanged(ConversationState state)
+        {
+            Debug.Log($"[TalkDiag] ConversationState -> {state}");
+            view?.ShowState(state);
+        }
+
         private void OnTranscriptReceived(string transcript) => view?.ShowTranscript(transcript);
-        private void OnFailure(ConversationFailure failure) => view?.ShowFailure(failure);
+
+        private void OnFailure(ConversationFailure failure)
+        {
+            Debug.LogWarning($"[TalkDiag] Failure: code={failure?.Code} retryable={failure?.IsRetryable} message={failure?.UserMessage}");
+            view?.ShowFailure(failure);
+        }
         private void OnSceneUnloaded(Scene scene) => RequestStop(ConversationStopReason.UserRequested);
 
         private sealed class SystemClock : IClock

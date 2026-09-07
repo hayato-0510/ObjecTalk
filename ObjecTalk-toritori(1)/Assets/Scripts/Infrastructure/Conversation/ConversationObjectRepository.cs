@@ -19,21 +19,27 @@ namespace ObjecTalk.Infrastructure.Conversation
         {
             if (string.IsNullOrWhiteSpace(objectId))
             {
+                UnityEngine.Debug.LogWarning("[TalkDiag] GetContext: objectId is null/empty");
                 return null;
             }
 
             string currentUserId = _currentUserId();
             if (string.IsNullOrWhiteSpace(currentUserId))
             {
+                UnityEngine.Debug.LogWarning($"[TalkDiag] GetContext: currentUserId is null/empty for objectId='{objectId}'");
                 return null;
             }
 
             ObjectItem item = _database.GetObjectWithDetails(objectId);
             if (item == null || !string.Equals(item.user_id, currentUserId, StringComparison.Ordinal))
             {
+                UnityEngine.Debug.LogWarning(
+                    $"[TalkDiag] GetContext: no match for objectId='{objectId}' " +
+                    $"item={(item == null ? "NULL" : $"user_id='{item.user_id}' name='{item.Name}'")} currentUserId='{currentUserId}'");
                 return null;
             }
 
+            UnityEngine.Debug.Log($"[TalkDiag] GetContext: resolved objectId='{objectId}' name='{item.Name}' promptLen={(item.PersonalityPrompt ?? string.Empty).Length}");
             return new ConversationContext(
                 item.object_id,
                 item.Name,

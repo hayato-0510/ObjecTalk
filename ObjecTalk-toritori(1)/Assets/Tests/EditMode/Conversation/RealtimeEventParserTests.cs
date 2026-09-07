@@ -18,6 +18,8 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         [TestCase("{\"type\":\"input_audio_buffer.speech_stopped\",\"event_id\":\"evt-stop\",\"item_id\":\"item-1\"}", RealtimeEventKind.SpeechStopped)]
         [TestCase("{\"type\":\"response.created\",\"response\":{\"id\":\"resp-1\"}}", RealtimeEventKind.ResponseStarted)]
         [TestCase("{\"type\":\"response.done\",\"response\":{\"id\":\"resp-1\"}}", RealtimeEventKind.ResponseDone)]
+        [TestCase("{\"type\":\"output_audio_buffer.started\",\"event_id\":\"evt-1\"}", RealtimeEventKind.OutputAudioStarted)]
+        [TestCase("{\"type\":\"output_audio_buffer.stopped\",\"event_id\":\"evt-1\"}", RealtimeEventKind.OutputAudioStopped)]
         public void TryParse_OfficialLifecycleEvent_ReturnsExpectedKind(string json, RealtimeEventKind expected)
         {
             Assert.That(_parser.TryParse(json, out RealtimeEvent realtimeEvent), Is.True);

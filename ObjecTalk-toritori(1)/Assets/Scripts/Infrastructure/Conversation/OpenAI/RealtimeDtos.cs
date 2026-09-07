@@ -11,6 +11,11 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         public const string AssistantTranscriptDone = "response.output_audio_transcript.done";
         public const string ResponseStarted = "response.created";
         public const string ResponseDone = "response.done";
+        // WebRTC-only playback events: the assistant's audio actually leaving / done leaving the
+        // speaker. They lag response.created/response.done by the size of the playback buffer, so
+        // they are the accurate cue for muting/unmuting the microphone against echo.
+        public const string OutputAudioStarted = "output_audio_buffer.started";
+        public const string OutputAudioStopped = "output_audio_buffer.stopped";
         public const string Error = "error";
     }
 
@@ -29,6 +34,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         AssistantTranscriptDone,
         ResponseStarted,
         ResponseDone,
+        OutputAudioStarted,
+        OutputAudioStopped,
         ApiError
     }
 

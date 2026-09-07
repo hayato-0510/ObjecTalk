@@ -15,29 +15,45 @@ export function createApp({ verifyIdToken, createRealtimeCall, voicePools, limit
   app.use(express.json({ limit: '256kb' }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
   app.post('/api/realtime/calls', async (req, res) => {
+    console.error('[TalkDiag] POST /api/realtime/calls from', req.ip, 'authHeaders=', countRawHeaders(req.rawHeaders, 'authorization'));
     if (countRawHeaders(req.rawHeaders, 'authorization') !== 1) {
       return res.status(401).json({ error: 'unauthorized' });
     }
     const token = extractBearerToken(req.get('authorization'));
-    if (!token) return res.status(401).json({ error: 'unauthorized' });
+    if (!token) {
+      console.error('[TalkDiag] no bearer token extracted');
+      return res.status(401).json({ error: 'unauthorized' });
+    }
     let identity;
     try {
       identity = await verifyIdToken(token);
-    } catch {
+    } catch (e) {
+      console.error('[TalkDiag] verifyIdToken threw:', e?.code, '-', e?.message);
       return res.status(401).json({ error: 'unauthorized' });
     }
-    if (!identity?.uid) return res.status(401).json({ error: 'unauthorized' });
+    if (!identity?.uid) {
+      console.error('[TalkDiag] identity has no uid:', JSON.stringify(identity));
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+    console.error('[TalkDiag] auth OK uid=', identity.uid);
     if (!limiter(identity.uid, req.ip ?? 'unknown')) return res.status(429).json({ error: 'rate_limited' });
     try {
       const input = validateBody(req.body);
+      console.error('[TalkDiag] body ok objectName=', input.objectName, 'sdpLen=', input.sdp.length, 'sdpHasAudio=', input.sdp.includes('m=audio'));
       const instructions = buildInstructions(input);
       const voice = selectVoice(input, voicePools);
+      console.error('[TalkDiag] voice=', voice, ' calling OpenAI...');
       const answer = await createRealtimeCall({ sdp: input.sdp, instructions, voice });
       if (typeof answer !== 'string' || answer.trim() === '') throw new Error('Empty SDP answer');
+      console.error('[TalkDiag] OpenAI answer ok, sdpLen=', answer.length);
       return res.type('application/sdp').send(answer);
     } catch (error) {
+      console.error('[TalkDiag] realtime call failed:', error?.code, error?.message);
       if (error instanceof TypeError || error instanceof RangeError) {
         return res.status(400).json({ error: 'invalid_request' });
+      }
+      if (error?.code === 'insufficient_quota') {
+        return res.status(402).json({ error: 'quota_exhausted' });
       }
       return res.status(502).json({ error: 'realtime_unavailable' });
     }

@@ -66,6 +66,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         Network,
         Timeout,
         ServiceUnavailable,
+        QuotaExhausted,
         InvalidResponse
     }
 
@@ -97,6 +98,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                     return "接続がタイムアウトしました。";
                 case RealtimeCallFailureKind.ServiceUnavailable:
                     return "音声会話サービスが一時的に利用できません。";
+                case RealtimeCallFailureKind.QuotaExhausted:
+                    return "音声会話サービスをただいまご利用いただけません。";
                 default:
                     return "音声会話サービスから正しい応答を受信できませんでした。";
             }
@@ -295,6 +298,12 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             if (statusCode == 401 || statusCode == 403)
             {
                 return RealtimeCallFailureKind.Authentication;
+            }
+
+            if (statusCode == 402)
+            {
+                // The backend maps an exhausted OpenAI credit balance to 402; retrying cannot help.
+                return RealtimeCallFailureKind.QuotaExhausted;
             }
 
             return statusCode == 408

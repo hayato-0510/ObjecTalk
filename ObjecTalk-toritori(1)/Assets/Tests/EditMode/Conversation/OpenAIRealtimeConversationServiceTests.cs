@@ -189,6 +189,72 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public async Task StartAsync_QuotaExhaustedFailurePublishesNonRetryableFailureWithoutRetrying()
+        {
+            var transport = new FakeTransport();
+            transport.Failures.Enqueue(new RealtimeCallException(RealtimeCallFailureKind.QuotaExhausted));
+            var delay = new FakeDelayProvider();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, delay);
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+
+            await service.StartAsync(Context, CancellationToken.None);
+
+            Assert.That(transport.ConnectCalls, Is.EqualTo(1));
+            Assert.That(delay.Delays, Is.Empty);
+            Assert.That(failures.Single().Code, Is.EqualTo("realtime_quota_exhausted"));
+            Assert.That(failures.Single().IsRetryable, Is.False);
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Idle));
+        }
+
+        [Test]
+        public async Task ApiError_ShortlyAfterABargeInCancel_IsSwallowed()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.SpeechStarted, "input_audio_buffer.speech_started", "", "", "", "", "", ""));
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ApiError, "error", "", "", "", "", "", ""));
+
+            Assert.That(failures, Is.Empty);
+        }
+
+        [Test]
+        public async Task ApiError_WithoutARecentCancel_IsStillReported()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+            await service.StartAsync(Context, CancellationToken.None);
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ApiError, "error", "", "", "", "", "", ""));
+
+            Assert.That(failures.Single().Code, Is.EqualTo("realtime_api_error"));
+        }
+
+        [Test]
+        public async Task ApiError_SuppressionIsConsumedOnce_SoALaterUnrelatedErrorStillReports()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            var failures = new List<ConversationFailure>();
+            service.ErrorOccurred += failures.Add;
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.SpeechStarted, "input_audio_buffer.speech_started", "", "", "", "", "", ""));
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ApiError, "error", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ApiError, "error", "", "", "", "", "", ""));
+
+            Assert.That(failures.Single().Code, Is.EqualTo("realtime_api_error"));
+        }
+
+        [Test]
         public async Task StartAsync_DeniedPermissionPublishesFailureWithoutConnectingOrRetrying()
         {
             var transport = new FakeTransport();
@@ -295,6 +361,119 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That(transport.CancelResponseCalls, Is.EqualTo(1));
             Assert.That(transport.StopRemotePlaybackCalls, Is.EqualTo(1));
             Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+        }
+
+        [Test]
+        public async Task ResponseStarted_DisablesLocalAudioCaptureToPreventEcho()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Speaking));
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false }));
+        }
+
+        [Test]
+        public async Task OutputAudioStopped_ReEnablesLocalAudioCaptureOnceTheReplyHasFinishedPlaying()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new TaskDelayProvider(),
+                microphoneResumeGrace: TimeSpan.Zero,
+                microphoneResumeFallbackGrace: TimeSpan.FromSeconds(10));
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseDone, "response.done", "", "", "", "", "", ""));
+
+            // response.done alone leaves the mic muted - the reply is still leaving the speaker.
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false }));
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.OutputAudioStopped, "output_audio_buffer.stopped", "", "", "", "", "", ""));
+
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false, true }));
+        }
+
+        [Test]
+        public async Task OutputAudioStarted_MutesLocalAudioCapture()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.OutputAudioStarted, "output_audio_buffer.started", "", "", "", "", "", ""));
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false }));
+        }
+
+        [Test]
+        public async Task SpeechStartedWhileSpeaking_ReEnablesLocalAudioCapture()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.SpeechStarted, "input_audio_buffer.speech_started", "", "", "", "", "", ""));
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false, true }));
+        }
+
+        [Test]
+        public async Task OutputAudioStopped_KeepsMicrophoneMutedUntilTheAcousticTailGraceElapses()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new TaskDelayProvider(),
+                microphoneResumeGrace: TimeSpan.FromMilliseconds(250),
+                microphoneResumeFallbackGrace: TimeSpan.FromSeconds(10));
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseDone, "response.done", "", "", "", "", "", ""));
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.OutputAudioStopped, "output_audio_buffer.stopped", "", "", "", "", "", ""));
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false }), "microphone must stay muted until the tail grace elapses");
+            await Task.Delay(700);
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false, true }));
+        }
+
+        [Test]
+        public async Task ResponseDoneWithoutOutputAudioStopped_ResumesMicrophoneViaFallbackGrace()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new TaskDelayProvider(),
+                microphoneResumeGrace: TimeSpan.FromMilliseconds(50),
+                microphoneResumeFallbackGrace: TimeSpan.FromMilliseconds(200));
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+
+            // output_audio_buffer.stopped never arrives; only response.done does.
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseDone, "response.done", "", "", "", "", "", ""));
+
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false }));
+            await Task.Delay(600);
+            Assert.That(transport.LocalAudioCaptureToggles, Is.EqualTo(new[] { false, true }));
+        }
+
+        [Test]
+        public async Task ResponseStartedAfterBargeIn_ResumesRemotePlaybackForTheNewTurn()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.SpeechStarted, "input_audio_buffer.speech_started", "", "", "", "", "", ""));
+            Assert.That(transport.StopRemotePlaybackCalls, Is.EqualTo(1));
+
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+
+            Assert.That(transport.StartRemotePlaybackCalls, Is.EqualTo(2));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Speaking));
         }
 
         [Test]
@@ -427,9 +606,16 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         private static OpenAIRealtimeConversationService CreateService(
             IMicrophonePermissionService permission,
             IRealtimeConversationTransport transport,
-            IConversationDelayProvider delay)
+            IConversationDelayProvider delay,
+            TimeSpan? microphoneResumeGrace = null,
+            TimeSpan? microphoneResumeFallbackGrace = null)
         {
-            return new OpenAIRealtimeConversationService(new ConversationStateMachine(), permission, transport, delay);
+            // Tests default both microphone-resume graces to zero so the resume is synchronous and
+            // deterministic; the timing itself is covered by dedicated tests.
+            return new OpenAIRealtimeConversationService(
+                new ConversationStateMachine(), permission, transport, delay,
+                microphoneResumeGrace ?? TimeSpan.Zero,
+                microphoneResumeFallbackGrace ?? TimeSpan.Zero);
         }
 
         private static async Task AssertCanceledAsync(Func<Task> operation)
@@ -530,6 +716,8 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             public int DisconnectCalls { get; private set; }
             public int CancelResponseCalls { get; private set; }
             public int StopRemotePlaybackCalls { get; private set; }
+            public int StartRemotePlaybackCalls { get; private set; }
+            public List<bool> LocalAudioCaptureToggles { get; } = new List<bool>();
             public Exception CancelException { get; set; }
             public Exception DisconnectException { get; set; }
             public int SubscriberCount => _eventReceived == null ? 0 : _eventReceived.GetInvocationList().Length;
@@ -580,6 +768,16 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             {
                 StopRemotePlaybackCalls++;
                 OperationLog.Add("stop-playback");
+            }
+
+            public void StartRemotePlayback()
+            {
+                StartRemotePlaybackCalls++;
+            }
+
+            public void SetLocalAudioCaptureEnabled(bool enabled)
+            {
+                LocalAudioCaptureToggles.Add(enabled);
             }
 
             public Task DisconnectAsync(CancellationToken cancellationToken)
