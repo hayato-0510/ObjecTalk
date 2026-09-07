@@ -112,9 +112,56 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
         public void SetPushToTalkActive(bool active)
         {
-            if (_pushToTalk)
+            if (!_pushToTalk)
             {
-                TrySetTransportAudioCapture(active);
+                return;
+            }
+
+            TrySetTransportAudioCapture(active);
+
+            // Pressing the button to talk means "my turn now" — cut the assistant off if it is
+            // still speaking, the same way a detected barge-in would.
+            if (active && CurrentState == ConversationState.Speaking)
+            {
+                long generation;
+                lock (_sync)
+                {
+                    generation = _stateMachine.CurrentGeneration;
+                }
+
+                InterruptAssistant(generation);
+            }
+        }
+
+        // Stop the current assistant turn: silence playback, tell the server to cancel, return to
+        // Listening. Shared by a detected barge-in and the push-to-talk button.
+        private void InterruptAssistant(long generation)
+        {
+            try
+            {
+                _transport.StopRemotePlayback();
+            }
+            catch (Exception)
+            {
+                PublishFailure(CreateOperationFailure(
+                    "realtime_playback_stop_failed",
+                    "音声出力を停止できませんでした。"));
+            }
+
+            try
+            {
+                ArmResponseCancelErrorSuppression();
+                ObserveCancellationFailure(_transport.CancelResponseAsync(CancellationToken.None));
+            }
+            catch (Exception)
+            {
+                PublishFailure(CreateOperationFailure(
+                    "realtime_response_cancel_failed",
+                    "応答の停止を確認できませんでした。"));
+            }
+            finally
+            {
+                TryPublishState(ConversationState.Listening, generation);
             }
         }
 
@@ -372,33 +419,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 case RealtimeEventKind.SpeechStarted:
                     if (CurrentState == ConversationState.Speaking)
                     {
-                        try
-                        {
-                            _transport.StopRemotePlayback();
-                        }
-                        catch (Exception)
-                        {
-                            PublishFailure(CreateOperationFailure(
-                                "realtime_playback_stop_failed",
-                                "音声出力を停止できませんでした。"));
-                        }
-
-                        try
-                        {
-                            ArmResponseCancelErrorSuppression();
-                            ObserveCancellationFailure(_transport.CancelResponseAsync(CancellationToken.None));
-                        }
-                        catch (Exception)
-                        {
-                            PublishFailure(CreateOperationFailure(
-                                "realtime_response_cancel_failed",
-                                "応答の停止を確認できませんでした。"));
-                        }
-                        finally
-                        {
-                            TryPublishState(ConversationState.Listening, generation);
-                            SafeSetLocalAudioCaptureEnabled(true);
-                        }
+                        InterruptAssistant(generation);
+                        SafeSetLocalAudioCaptureEnabled(true);
                     }
                     break;
                 case RealtimeEventKind.UserTranscriptCompleted:

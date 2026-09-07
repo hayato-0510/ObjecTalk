@@ -35,7 +35,12 @@ namespace ObjecTalk.Presentation.Talk
         private bool tickRunning;
         private int stopRequested;
         private GameObject runtimePushToTalkButton;
+        private UnityEngine.UI.Image pushToTalkImage;
+        private TMPro.TextMeshProUGUI pushToTalkLabel;
         private float conversationActiveSince = -1f;
+
+        private static readonly Color PushToTalkIdleColor = new Color(0.12f, 0.44f, 0.36f);
+        private static readonly Color PushToTalkHeldColor = new Color(0.96f, 0.80f, 0.20f);
 
         private void Awake()
         {
@@ -214,10 +219,35 @@ namespace ObjecTalk.Presentation.Talk
                 return;
             }
 
+            Debug.Log("[TalkDiag] push-to-talk button ready");
             pushToTalkButton.HeldChanged += OnPushToTalkHeldChanged;
+            ShowPushToTalkButton(false);
         }
 
-        private void OnPushToTalkHeldChanged(bool held) => voiceService?.SetPushToTalkActive(held);
+        private void OnPushToTalkHeldChanged(bool held)
+        {
+            Debug.Log($"[TalkDiag] push-to-talk {(held ? "HELD" : "released")}");
+            voiceService?.SetPushToTalkActive(held);
+
+            if (pushToTalkImage != null)
+            {
+                pushToTalkImage.color = held ? PushToTalkHeldColor : PushToTalkIdleColor;
+            }
+
+            if (pushToTalkLabel != null)
+            {
+                pushToTalkLabel.text = held ? "はなす（指をはなすと返事）" : "おして話す";
+                pushToTalkLabel.color = held ? new Color(0.14f, 0.30f, 0.24f) : Color.white;
+            }
+        }
+
+        private void ShowPushToTalkButton(bool visible)
+        {
+            if (pushToTalkButton != null && pushToTalkButton.gameObject.activeSelf != visible)
+            {
+                pushToTalkButton.gameObject.SetActive(visible);
+            }
+        }
 
         private PushToTalkButton CreateRuntimePushToTalkButton()
         {
@@ -252,13 +282,14 @@ namespace ObjecTalk.Presentation.Talk
             rect.anchorMin = new Vector2(0f, 0f);
             rect.anchorMax = new Vector2(1f, 0f);
             rect.pivot = new Vector2(0.5f, 0f);
-            rect.offsetMin = new Vector2(48f, 40f);
-            rect.offsetMax = new Vector2(-48f, 40f + 220f);
+            rect.offsetMin = new Vector2(40f, 48f);
+            rect.offsetMax = new Vector2(-40f, 48f + 300f);
             rect.SetAsLastSibling();
 
             var image = go.GetComponent<UnityEngine.UI.Image>();
-            image.color = new Color(0.12f, 0.44f, 0.36f);
+            image.color = PushToTalkIdleColor;
             image.raycastTarget = true;
+            pushToTalkImage = image;
 
             var labelGo = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer));
             var labelRect = (RectTransform)labelGo.transform;
@@ -274,9 +305,10 @@ namespace ObjecTalk.Presentation.Talk
                 label.alignment = TMPro.TextAlignmentOptions.Center;
                 label.enableAutoSizing = true;
                 label.fontSizeMin = 24f;
-                label.fontSizeMax = 72f;
+                label.fontSizeMax = 64f;
                 label.color = Color.white;
                 label.raycastTarget = false;
+                pushToTalkLabel = label;
             }
             catch (Exception)
             {
@@ -417,6 +449,11 @@ namespace ObjecTalk.Presentation.Talk
             {
                 conversationActiveSince = Time.realtimeSinceStartup;
             }
+
+            bool conversationLive = state == ConversationState.Listening
+                || state == ConversationState.Speaking
+                || state == ConversationState.Reconnecting;
+            ShowPushToTalkButton(conversationLive);
 
             view?.ShowState(state);
         }

@@ -500,6 +500,23 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public async Task PushToTalk_PressingTheButtonWhileTheAssistantSpeaksCutsItOff()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(), pushToTalk: true);
+            await service.StartAsync(Context, CancellationToken.None);
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.ResponseStarted, "response.created", "", "", "", "", "", ""));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Speaking));
+
+            service.SetPushToTalkActive(true);
+
+            Assert.That(transport.StopRemotePlaybackCalls, Is.EqualTo(1));
+            Assert.That(transport.CancelResponseCalls, Is.EqualTo(1));
+            Assert.That(service.CurrentState, Is.EqualTo(ConversationState.Listening));
+            Assert.That(transport.LocalAudioCaptureToggles[transport.LocalAudioCaptureToggles.Count - 1], Is.True);
+        }
+
+        [Test]
         public async Task SetPushToTalkActive_IsIgnoredWhenNotInPushToTalkMode()
         {
             var transport = new FakeTransport();
