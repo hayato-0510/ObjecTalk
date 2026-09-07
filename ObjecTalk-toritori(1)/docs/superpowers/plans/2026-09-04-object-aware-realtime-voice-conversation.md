@@ -1,5 +1,13 @@
 # Object-Aware Realtime Voice Conversation Implementation Plan
 
+> **STATUS (2026-09-07): Tasks 1–8 implemented on `feature/object-aware-realtime-voice`**,
+> EditMode/PlayMode/Backend suites green, exercised end-to-end on a Samsung SC-03L.
+> The checkboxes were not ticked. Task 9 (security / regression / ops verification)
+> is partly done — full device sign-off against `Backend/docs/dev-device-verification.md`
+> is still open, gated on an acoustic-echo issue tracked in
+> `plans/2026-09-07-realtime-voice-echo-cancellation.md` and the
+> `realtime-voice-device-verification` memory. Not yet merged to `main`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Start a private, hands-free Japanese OpenAI Realtime voice conversation for the currently recognized ObjecTalk object, with a 10-second recognition-loss grace period and a 2-second confirmed handoff to another object.

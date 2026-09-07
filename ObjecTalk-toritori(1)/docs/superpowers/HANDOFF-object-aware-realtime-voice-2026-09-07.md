@@ -1,5 +1,14 @@
 # Handoff — Object-Aware Realtime Voice Conversation
 
+> **SUPERSEDED 2026-09-07 (later same day).** Both open items below are resolved:
+> the EditMode Conversation suite no longer hangs (fixed in `cce7ce2` "prevent
+> conversation EditMode test deadlocks"), and Task 8 (Talk presentation + scene
+> integration) shipped in `ebc39ed` / `b3e46d0` / `b6cce7b`. The branch now
+> compiles, EditMode/PlayMode/Backend suites are green, and the feature has been
+> exercised end-to-end on a Samsung SC-03L. Current status and the remaining
+> work live in the `realtime-voice-device-verification` project memory and
+> `plans/2026-09-07-realtime-voice-echo-cancellation.md`. Kept for history.
+
 **Date:** 2026-09-07
 **Branch:** `feature/object-aware-realtime-voice` @ `80706f6`
 **From:** Claude Code session `session_01Nu7hQUFGAceVesKjSRJkzZ` (object-detection / Android-build lane)

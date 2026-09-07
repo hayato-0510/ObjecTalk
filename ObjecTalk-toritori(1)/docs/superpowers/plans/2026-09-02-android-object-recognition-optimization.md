@@ -1,5 +1,14 @@
 # Android Object Recognition Optimization Implementation Plan
 
+> **STATUS: implemented and merged to `main` (2026-09).** The checkboxes below were
+> never ticked, but the code and tests exist: `EmbeddingMath`,
+> `TemporalRecognitionFilter`, `AdaptiveRecognitionScheduler`, the path-taking
+> `DatabaseManager` constructor + `RecognitionSampleRepository`, the Sentis
+> `mobilenetv3-small-embedding-fp16.onnx` model, and the GPU preprocessing /
+> AKAZE verification path. Known follow-up: OpenCV+Unity has no arm64 native lib,
+> so AKAZE falls back to `NullLocalFeatureVerifier` on device — see the
+> `android-build-notes` memory. Kept as a spec of record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the synchronous Barracuda recognition path with a tested Sentis-based, three-view object recognition pipeline optimized for Android 10+.

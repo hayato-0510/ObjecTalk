@@ -1,5 +1,14 @@
 # Registration Capture UI and Frame Preprocessing Implementation Plan
 
+> **STATUS: implemented and merged to `main` (`feature/registration-capture-ui`,
+> up to `b8a9c3d`).** Crop-guide overlay, face overlay on recognition, capture
+> flash, 3-view progress, naming-photo crop, and the frame preprocessing all
+> shipped. Scene wiring lives in `ObjectDetectionScene.unity` / `Myscenes.unity`.
+> The checkboxes below were not ticked; see the `objectdetectionscene-quirks`
+> memory for the residual scene cleanup (English "register" button label, unused
+> `RegistrationUI`/`TargetBox` nodes, duplicate `EmbeddingObjectMatcher`). Kept
+> as a spec of record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the 3-view object-registration flow legible (a "n / 3 枚目" progress readout, three progress dots, an on-preview crop guide, instruction copy), correct the sideways camera preview, and feed the embedding a tighter upright center crop.
