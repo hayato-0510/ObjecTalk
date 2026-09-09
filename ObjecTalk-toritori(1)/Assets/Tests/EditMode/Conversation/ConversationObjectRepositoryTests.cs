@@ -84,6 +84,30 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         }
 
         [Test]
+        public void GetContext_Category_IsTrimmedFromTheObjectRow()
+        {
+            using (var database = CreateDatabase())
+            {
+                SaveObject(database, "object-1", "user-1", "ノートPC", "元気に話す", "  電子機器  ");
+                var repository = new ConversationObjectRepository(database, () => "user-1");
+
+                Assert.That(repository.GetContext("object-1").Category, Is.EqualTo("電子機器"));
+            }
+        }
+
+        [Test]
+        public void GetContext_NullCategory_NormalizesToEmptyString()
+        {
+            using (var database = CreateDatabase())
+            {
+                SaveObject(database, "object-1", "user-1", "本", "静かに説明する", null);
+                var repository = new ConversationObjectRepository(database, () => "user-1");
+
+                Assert.That(repository.GetContext("object-1").Category, Is.Empty);
+            }
+        }
+
+        [Test]
         public void GetContext_NullPersonality_NormalizesToEmptyString()
         {
             using (var database = CreateDatabase())
@@ -121,7 +145,8 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             string objectId,
             string userId,
             string objectName,
-            string personalityPrompt)
+            string personalityPrompt,
+            string category = null)
         {
             database.SaveObjectWithFeatures(
                 new ObjectItem
@@ -129,7 +154,8 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                     object_id = objectId,
                     user_id = userId,
                     Name = objectName,
-                    PersonalityPrompt = personalityPrompt
+                    PersonalityPrompt = personalityPrompt,
+                    Category = category
                 },
                 new List<string>());
         }

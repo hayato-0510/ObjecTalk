@@ -50,7 +50,8 @@ namespace ObjecTalk.Infrastructure.Conversation
                 item.Name,
                 item.PersonalityPrompt,
                 currentUserId,
-                "ja");
+                "ja",
+                (item.Category ?? string.Empty).Trim());
         }
     }
 }
