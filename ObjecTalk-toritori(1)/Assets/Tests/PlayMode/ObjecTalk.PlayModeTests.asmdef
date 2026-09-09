@@ -16,6 +16,8 @@
     "ObjecTalk.Core.Conversation",
     "ObjecTalk.Infrastructure.Conversation",
     "ObjecTalk.Presentation.Talk",
+    "ObjecTalk.Core.Exhibition",
+    "ObjecTalk.Presentation.Exhibition",
     "Unity.TextMeshPro"
   ],
   "includePlatforms": [],
