@@ -1,0 +1,14 @@
+{
+  "name": "ObjecTalk.Core.Exhibition",
+  "rootNamespace": "ObjecTalk.Core.Exhibition",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

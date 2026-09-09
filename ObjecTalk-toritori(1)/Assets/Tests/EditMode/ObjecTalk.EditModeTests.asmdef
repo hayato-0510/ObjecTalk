@@ -13,7 +13,8 @@
     "ObjecTalk.Infrastructure.AI.Embedding",
     "ObjecTalk.Domain.Conversation",
     "ObjecTalk.Core.Conversation",
-    "ObjecTalk.Infrastructure.Conversation"
+    "ObjecTalk.Infrastructure.Conversation",
+    "ObjecTalk.Core.Exhibition"
   ],
   "includePlatforms": [
     "Editor"
