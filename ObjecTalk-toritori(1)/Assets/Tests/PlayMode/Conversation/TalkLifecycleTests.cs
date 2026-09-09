@@ -165,7 +165,7 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
             var voice = new FakeVoiceConversationService();
             var coordinator = CreateCoordinator(voice);
             var controller = root.AddComponent<TalkController>();
-            controller.InitializeForTests(source, coordinator, voice, view);
+            controller.InitializeForTests(source, coordinator, voice, view, new FakeConversationObjectRepository());
 
             root.SetActive(true);
             source.Emit(Seen("object-1", "Cup"));
@@ -195,6 +195,46 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
 
             fixture.Voice.PublishState(ConversationState.Idle);
             Assert.That(controller.IsConversationActive, Is.False);
+
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
+        [UnityTest]
+        public IEnumerator TalkController_ShowsCategoryQuestionPrompts_UntilTheAssistantSpeaks()
+        {
+            var fixture = CreateTalkFixture();
+            var view = fixture.Root.GetComponent<TalkView>();
+            fixture.Root.SetActive(true);
+
+            // object-1 -> category 本
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+            Assert.That(view.ShownSuggestions, Is.Not.Empty);
+            Assert.That(view.ShownSuggestions, Has.Some.Contains("書いてある"));
+
+            // switching to object-2 -> category 電子機器 swaps the prompts
+            fixture.Source.Emit(Seen("object-2", "Board"));
+            yield return null;
+            Assert.That(view.ShownSuggestions, Has.Some.Contains("AI"));
+
+            // the assistant starting to talk dismisses them
+            fixture.Voice.PublishState(ConversationState.Speaking);
+            Assert.That(view.ShownSuggestions, Is.Empty);
+
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
+        [UnityTest]
+        public IEnumerator TalkController_ShowsNoPrompts_ForAnObjectWithoutAKnownCategory()
+        {
+            var fixture = CreateTalkFixture();
+            var view = fixture.Root.GetComponent<TalkView>();
+            fixture.Root.SetActive(true);
+
+            fixture.Source.Emit(Seen("object-9", "Mystery"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+
+            Assert.That(view.ShownSuggestions, Is.Empty);
 
             UnityEngine.Object.Destroy(fixture.Root);
         }
@@ -290,7 +330,7 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
             var voice = new FakeVoiceConversationService();
             var coordinator = CreateCoordinator(voice);
             var controller = root.AddComponent<TalkController>();
-            controller.InitializeForTests(source, coordinator, voice, view);
+            controller.InitializeForTests(source, coordinator, voice, view, new FakeConversationObjectRepository());
             return new TalkFixture(root, source, voice);
         }
 
@@ -350,7 +390,11 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
         {
             public ConversationContext GetContext(string objectId)
             {
-                return new ConversationContext(objectId, objectId == "object-1" ? "Cup" : "Book", string.Empty, "user-1", "ja");
+                var name = objectId == "object-1" ? "Cup" : "Book";
+                var category = objectId == "object-1" ? "本"
+                    : objectId == "object-2" ? "電子機器"
+                    : string.Empty;
+                return new ConversationContext(objectId, name, string.Empty, "user-1", "ja", category);
             }
         }
 

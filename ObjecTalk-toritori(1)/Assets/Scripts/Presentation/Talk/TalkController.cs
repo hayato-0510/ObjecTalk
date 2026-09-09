@@ -32,7 +32,9 @@ namespace ObjecTalk.Presentation.Talk
         private IRecognitionObservationSource recognitionSource;
         private ObjectConversationCoordinator coordinator;
         private IVoiceConversationService voiceService;
+        private IConversationObjectRepository objectRepository;
         private DatabaseManager database;
+        private string suggestionsObjectId;
         private bool subscribed;
         private bool tickRunning;
         private int stopRequested;
@@ -143,13 +145,15 @@ namespace ObjecTalk.Presentation.Talk
             IRecognitionObservationSource source,
             ObjectConversationCoordinator conversationCoordinator,
             IVoiceConversationService conversationService,
-            TalkView talkView)
+            TalkView talkView,
+            IConversationObjectRepository repository = null)
         {
             Unsubscribe();
             recognitionSource = source ?? throw new ArgumentNullException(nameof(source));
             coordinator = conversationCoordinator ?? throw new ArgumentNullException(nameof(conversationCoordinator));
             voiceService = conversationService ?? throw new ArgumentNullException(nameof(conversationService));
             view = talkView ?? throw new ArgumentNullException(nameof(talkView));
+            objectRepository = repository;
             if (isActiveAndEnabled)
             {
                 Subscribe();
@@ -173,6 +177,7 @@ namespace ObjecTalk.Presentation.Talk
             {
                 database = new DatabaseManager();
                 var repository = new ConversationObjectRepository(database, () => recognitionSource.CurrentUserId);
+                objectRepository = repository;
                 var callClient = new RealtimeCallClient(
                     configuration.ResolveBackendBaseUrl(),
                     new FirebaseIdTokenProvider(),
@@ -403,6 +408,7 @@ namespace ObjecTalk.Presentation.Talk
             if (state != null && state.IsRecognized)
             {
                 view.SetCurrentObjectName(state.ObjectName);
+                UpdateSuggestions(state.ObjectId);
             }
 
             try
@@ -465,12 +471,50 @@ namespace ObjecTalk.Presentation.Talk
                 conversationActiveSince = Time.realtimeSinceStartup;
             }
 
+            // The read-aloud prompts are a lead-in for the first question, so they go once the
+            // assistant starts talking; a full stop lets the next object show a fresh set.
+            if (state == ConversationState.Speaking)
+            {
+                view?.ClearSuggestions();
+            }
+            else if (state == ConversationState.Idle)
+            {
+                view?.ClearSuggestions();
+                suggestionsObjectId = null;
+            }
+
             bool conversationLive = state == ConversationState.Listening
                 || state == ConversationState.Speaking
                 || state == ConversationState.Reconnecting;
             ShowPushToTalkButton(conversationLive);
 
             view?.ShowState(state);
+        }
+
+        /// <summary>
+        /// Shows the category question prompts for a newly recognised object. A no-op while the same
+        /// object stays recognised (the prompts already showed, or were dismissed on purpose).
+        /// </summary>
+        private void UpdateSuggestions(string objectId)
+        {
+            if (string.IsNullOrEmpty(objectId) || string.Equals(objectId, suggestionsObjectId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            suggestionsObjectId = objectId;
+
+            string category = string.Empty;
+            try
+            {
+                category = objectRepository?.GetContext(objectId)?.Category ?? string.Empty;
+            }
+            catch (Exception)
+            {
+                // A lookup failure just means no prompts; the conversation itself is unaffected.
+            }
+
+            view?.ShowSuggestions(CategorySuggestions.ForCategory(category));
         }
 
         private void OnTranscriptReceived(string transcript) => view?.ShowTranscript(transcript);
