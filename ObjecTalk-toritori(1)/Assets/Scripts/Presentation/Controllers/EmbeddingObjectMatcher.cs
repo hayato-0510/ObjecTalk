@@ -249,6 +249,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     // rebuilds it lazily, so it survives this DontDestroyOnLoad singleton outliving its scene canvas.
     private GameObject _debugWipeRoot;
     private GameObject _debugWipeButtonGo;
+    private GameObject _debugSeedButtonGo;
     private GameObject _debugWipeConfirmGo;
     private bool _debugWipeInProgress;
 
@@ -853,13 +854,15 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         }
     }
 
-    // --- Debug: wipe registered data ---------------------------------------------------------------
-    // Builds an always-visible "登録データ消去" button on the recognition panel and, on a two-step
-    // confirm, clears every registered object + its recognition samples (DatabaseManager
-    // .ClearRegistrationData) while keeping the users row so the single exhibition account stays
-    // logged in, then refreshes recognition in place. Everything is created in code so there is no
-    // scene edit or Inspector wiring, matching this scene's convention and TalkController's runtime
-    // button.
+    // --- Debug / exhibition ops: visitor wipe + seed marking --------------------------------------
+    // Builds two always-visible runtime buttons on the recognition panel:
+    //   "来場者データ消去" — two-step confirm, then DatabaseManager.ClearVisitorRegistrations
+    //     (drops non-seed objects + their samples; keeps seed objects and the users row), then
+    //     refreshes recognition in place.
+    //   "今の登録をシード化" — DatabaseManager.MarkAllObjectsAsSeed, for exhibition setup: register
+    //     the 5-department showcase objects, then tap once so they survive the visitor wipe.
+    // Everything is created in code so there is no scene edit or Inspector wiring, matching this
+    // scene's convention and TalkController's runtime button.
 
     private void EnsureDebugWipeButton()
     {
@@ -875,12 +878,18 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         rootRect.anchorMax = new Vector2(0f, 1f);
         rootRect.pivot = new Vector2(0f, 1f);
         rootRect.anchoredPosition = new Vector2(24f, -24f);
-        rootRect.sizeDelta = new Vector2(560f, 140f);
+        rootRect.sizeDelta = new Vector2(560f, 240f);
         rootRect.SetAsLastSibling();
 
         _debugWipeButtonGo = CreateDebugWipeButton(
-            rootRect, "登録データ消去", new Color(0.75f, 0.15f, 0.15f, 0.92f),
+            rootRect, "来場者データ消去", new Color(0.75f, 0.15f, 0.15f, 0.92f),
             new Vector2(320f, 88f), new Vector2(0f, 0f), OnDebugWipeRequested);
+
+        // Exhibition setup: after registering the 5-department showcase objects, tap this once so
+        // every current registration is marked seed and survives "来場者データ消去".
+        _debugSeedButtonGo = CreateDebugWipeButton(
+            rootRect, "今の登録をシード化", new Color(0.15f, 0.35f, 0.55f, 0.92f),
+            new Vector2(320f, 88f), new Vector2(0f, -100f), OnSeedAllRequested);
 
         _debugWipeConfirmGo = new GameObject("Confirm", typeof(RectTransform));
         var confirmRect = (RectTransform)_debugWipeConfirmGo.transform;
@@ -890,7 +899,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         confirmRect.offsetMin = Vector2.zero;
         confirmRect.offsetMax = Vector2.zero;
 
-        CreateDebugWipeLabel(confirmRect, "登録した物体をすべて消します。よろしいですか？",
+        CreateDebugWipeLabel(confirmRect, "来場者が登録した物体を消します（シード物体は残します）。よろしいですか？",
             new Vector2(560f, 44f), new Vector2(0f, 0f));
         CreateDebugWipeButton(confirmRect, "削除する", new Color(0.75f, 0.15f, 0.15f, 0.95f),
             new Vector2(270f, 84f), new Vector2(0f, -50f), ConfirmDebugWipe);
@@ -976,6 +985,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     private void OnDebugWipeRequested()
     {
         if (_debugWipeButtonGo != null) _debugWipeButtonGo.SetActive(false);
+        if (_debugSeedButtonGo != null) _debugSeedButtonGo.SetActive(false);
         if (_debugWipeConfirmGo != null) _debugWipeConfirmGo.SetActive(true);
     }
 
@@ -983,6 +993,30 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     {
         if (_debugWipeConfirmGo != null) _debugWipeConfirmGo.SetActive(false);
         if (_debugWipeButtonGo != null) _debugWipeButtonGo.SetActive(true);
+        if (_debugSeedButtonGo != null) _debugSeedButtonGo.SetActive(true);
+    }
+
+    private void OnSeedAllRequested()
+    {
+        if (dbManager == null)
+        {
+            SetStatusText("DBに接続できていないためシード化できません。");
+            return;
+        }
+
+        try
+        {
+            dbManager.MarkAllObjectsAsSeed();
+        }
+        catch (Exception e)
+        {
+            SetStatusText($"シード化に失敗しました: {e.Message}");
+            Debug.LogError($"Seed-all failed: {e}");
+            return;
+        }
+
+        LoadRegisteredObjects();
+        SetStatusText("今の登録をすべてシード（削除対象外）にしました。");
     }
 
     private void ConfirmDebugWipe()
@@ -1002,20 +1036,20 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         _debugWipeInProgress = true;
         try
         {
-            dbManager.ClearRegistrationData();
+            dbManager.ClearVisitorRegistrations();
         }
         catch (Exception e)
         {
             _debugWipeInProgress = false;
             CancelDebugWipe();
-            SetStatusText($"登録データの消去に失敗しました: {e.Message}");
-            Debug.LogError($"Debug wipe failed: {e}");
+            SetStatusText($"来場者データの消去に失敗しました: {e.Message}");
+            Debug.LogError($"Visitor wipe failed: {e}");
             return;
         }
 
-        Debug.Log("Debug wipe: registered objects and samples cleared; refreshing recognition in place.");
+        Debug.Log("Visitor wipe: non-seed objects and samples cleared; refreshing recognition in place.");
         LoadRegisteredObjects();
-        SetStatusText("登録データを消去しました。");
+        SetStatusText("来場者データを消去しました。シード物体は残っています。");
         _debugWipeInProgress = false;
         CancelDebugWipe();
     }
