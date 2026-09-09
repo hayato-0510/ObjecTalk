@@ -1,9 +1,9 @@
-export function createOpenAIRealtimeCall({ apiKey, model, voice, fetchImpl = fetch }) {
+export function createOpenAIRealtimeCall({ apiKey, model, voice, tools = [], fetchImpl = fetch }) {
   if (!apiKey) throw new Error('OpenAI API key is required');
   return async function createRealtimeCall({ sdp, instructions, voice: selectedVoice = voice, signal }) {
     const form = new FormData();
     form.append('sdp', sdp);
-    form.append('session', JSON.stringify({
+    const session = {
       type: 'realtime',
       model,
       output_modalities: ['audio'],
@@ -23,7 +23,12 @@ export function createOpenAIRealtimeCall({ apiKey, model, voice, fetchImpl = fet
         },
         output: { voice: selectedVoice },
       },
-    }));
+    };
+    if (Array.isArray(tools) && tools.length > 0) {
+      session.tools = tools;
+      session.tool_choice = 'auto';
+    }
+    form.append('session', JSON.stringify(session));
     const response = await fetchImpl('https://api.openai.com/v1/realtime/calls', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },

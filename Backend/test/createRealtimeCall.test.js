@@ -51,3 +51,28 @@ test('leaves a transient 429 untagged so it stays retryable', async () => {
   const call = createOpenAIRealtimeCall({ apiKey: 'key', model: 'model', voice: 'voice', fetchImpl: async () => ({ ok: false, status: 429, text: async () => body }) });
   await assert.rejects(call({ sdp: 'offer', instructions: 'rules' }), (error) => error.code === undefined);
 });
+
+test('registers tools and tool_choice auto when tools are provided', async () => {
+  let request;
+  const tools = [{ type: 'function', name: 'get_weather', description: 'd', parameters: { type: 'object', properties: {} } }];
+  const call = createOpenAIRealtimeCall({
+    apiKey: 'k', model: 'm', voice: 'marin', tools,
+    fetchImpl: async (url, options) => { request = { url, options }; return { ok: true, text: async () => 'answer' }; },
+  });
+  await call({ sdp: 'offer', instructions: 'rules' });
+  const session = JSON.parse(request.options.body.get('session'));
+  assert.deepEqual(session.tools, tools);
+  assert.equal(session.tool_choice, 'auto');
+});
+
+test('omits tools and tool_choice when none are provided', async () => {
+  let request;
+  const call = createOpenAIRealtimeCall({
+    apiKey: 'k', model: 'm', voice: 'marin',
+    fetchImpl: async (url, options) => { request = { url, options }; return { ok: true, text: async () => 'answer' }; },
+  });
+  await call({ sdp: 'offer', instructions: 'rules' });
+  const session = JSON.parse(request.options.body.get('session'));
+  assert.equal('tools' in session, false);
+  assert.equal('tool_choice' in session, false);
+});
