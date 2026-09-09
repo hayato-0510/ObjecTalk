@@ -6,6 +6,8 @@ export function loadEnvironment(env = process.env) {
   const firebaseProjectId = required(env.FIREBASE_PROJECT_ID, 'FIREBASE_PROJECT_ID');
   const model = optionalValidated(env.OPENAI_REALTIME_MODEL, 'gpt-realtime-2.1', MODEL_PATTERN, 'OPENAI_REALTIME_MODEL');
   const voice = optionalValidated(env.OPENAI_REALTIME_VOICE, 'marin', VOICE_PATTERN, 'OPENAI_REALTIME_VOICE');
+  const webSearchModel = optionalValidated(env.OPENAI_WEB_SEARCH_MODEL, 'gpt-4o-mini', MODEL_PATTERN, 'OPENAI_WEB_SEARCH_MODEL');
+  const toolInvokeTimeoutMs = optionalPositiveInt(env.TOOL_INVOKE_TIMEOUT_MS, 'TOOL_INVOKE_TIMEOUT_MS') ?? 8000;
   const port = parsePort(env.PORT ?? '8080');
   const exhibitionDailyBudgetMinutes = optionalPositiveInt(env.EXHIBITION_DAILY_BUDGET_MINUTES, 'EXHIBITION_DAILY_BUDGET_MINUTES');
   const exhibitionMinutesPerSession = optionalPositiveInt(env.EXHIBITION_MINUTES_PER_SESSION, 'EXHIBITION_MINUTES_PER_SESSION') ?? 3;
@@ -19,6 +21,8 @@ export function loadEnvironment(env = process.env) {
     firebaseProjectId,
     model,
     voice,
+    webSearchModel,
+    toolInvokeTimeoutMs,
     voicePools,
     port,
     exhibitionDailyBudgetMinutes,

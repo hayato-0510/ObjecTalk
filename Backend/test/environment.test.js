@@ -54,3 +54,23 @@ test('reads the exhibition budget when configured and rejects a bad value', () =
   assert.throws(() => loadEnvironment({ ...base, EXHIBITION_DAILY_BUDGET_MINUTES: 'lots' }), /EXHIBITION_DAILY_BUDGET_MINUTES/);
   assert.throws(() => loadEnvironment({ ...base, EXHIBITION_MINUTES_PER_SESSION: '-1' }), /EXHIBITION_MINUTES_PER_SESSION/);
 });
+
+test('loads tool-layer defaults and overrides', () => {
+  const value = loadEnvironment({ OPENAI_API_KEY: 'key', FIREBASE_PROJECT_ID: 'project' });
+  assert.equal(value.webSearchModel, 'gpt-4o-mini');
+  assert.equal(value.toolInvokeTimeoutMs, 8000);
+
+  const overridden = loadEnvironment({
+    OPENAI_API_KEY: 'key', FIREBASE_PROJECT_ID: 'project',
+    OPENAI_WEB_SEARCH_MODEL: 'gpt-5-mini', TOOL_INVOKE_TIMEOUT_MS: '5000',
+  });
+  assert.equal(overridden.webSearchModel, 'gpt-5-mini');
+  assert.equal(overridden.toolInvokeTimeoutMs, 5000);
+});
+
+test('rejects an invalid tool timeout', () => {
+  assert.throws(
+    () => loadEnvironment({ OPENAI_API_KEY: 'k', FIREBASE_PROJECT_ID: 'p', TOOL_INVOKE_TIMEOUT_MS: '-1' }),
+    /TOOL_INVOKE_TIMEOUT_MS/,
+  );
+});
