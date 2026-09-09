@@ -54,6 +54,20 @@ namespace ObjecTalk.Domain.Conversation
                 },
             };
 
+        // The spellings an operator is likely to type instead of the canonical label. Kept in sync
+        // with the backend's categoryPersona aliases.
+        private static readonly Dictionary<string, string> Aliases =
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["かさ"] = "傘",
+                ["ほん"] = "本",
+                ["のみもの"] = "飲みもの",
+                ["飲み物"] = "飲みもの",
+                ["ぶんぼうぐ"] = "文房具",
+                ["アクセサリー"] = "アクセサリ",
+                ["でんしきき"] = "電子機器",
+            };
+
         public static IReadOnlyList<string> ForCategory(string category)
         {
             if (string.IsNullOrWhiteSpace(category))
@@ -61,7 +75,13 @@ namespace ObjecTalk.Domain.Conversation
                 return None;
             }
 
-            return ByCategory.TryGetValue(category.Trim(), out var prompts) ? prompts : None;
+            var key = category.Trim();
+            if (Aliases.TryGetValue(key, out var canonical))
+            {
+                key = canonical;
+            }
+
+            return ByCategory.TryGetValue(key, out var prompts) ? prompts : None;
         }
     }
 }

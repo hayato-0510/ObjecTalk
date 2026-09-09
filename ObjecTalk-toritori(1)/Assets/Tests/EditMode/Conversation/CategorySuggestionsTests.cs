@@ -31,6 +31,20 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 Is.EqualTo(CategorySuggestions.ForCategory("本")));
         }
 
+        [TestCase("かさ", "傘")]
+        [TestCase("ほん", "本")]
+        [TestCase("のみもの", "飲みもの")]
+        [TestCase("飲み物", "飲みもの")]
+        [TestCase("ぶんぼうぐ", "文房具")]
+        [TestCase("アクセサリー", "アクセサリ")]
+        public void ForCategory_FoldsCommonSpellingsToTheCanonicalLabel(string alias, string canonical)
+        {
+            Assert.That(
+                CategorySuggestions.ForCategory(alias),
+                Is.EqualTo(CategorySuggestions.ForCategory(canonical)));
+            Assert.That(CategorySuggestions.ForCategory(alias), Is.Not.Empty);
+        }
+
         [Test]
         public void ForCategory_ElectronicsPromptsCoverMakingAndAi()
         {

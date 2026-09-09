@@ -23,6 +23,16 @@ test('surrounding whitespace is trimmed before lookup', () => {
   assert.notEqual(categoryPersona('本'), '');
 });
 
+test('common hiragana spellings fold to the canonical label', () => {
+  assert.equal(categoryPersona('かさ'), categoryPersona('傘'));
+  assert.equal(categoryPersona('ほん'), categoryPersona('本'));
+  assert.equal(categoryPersona('のみもの'), categoryPersona('飲みもの'));
+  assert.equal(categoryPersona('飲み物'), categoryPersona('飲みもの'));
+  assert.equal(categoryPersona('ぶんぼうぐ'), categoryPersona('文房具'));
+  assert.equal(categoryPersona('アクセサリー'), categoryPersona('アクセサリ'));
+  assert.notEqual(categoryPersona('かさ'), '');
+});
+
 test('その他 has no persona line', () => {
   assert.equal(categoryPersona('その他'), '');
 });
