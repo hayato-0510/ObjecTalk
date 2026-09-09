@@ -672,13 +672,125 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That(transcripts, Is.EqualTo(new[] { "one-time text" }));
         }
 
+        [Test]
+        public async Task FunctionCall_RunsTheToolAndSendsItsOutputWithActivityToggling()
+        {
+            var transport = new FakeTransport();
+            var invoker = new FakeToolInvoker("鈴鹿は晴れ。");
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(),
+                toolInvoker: invoker);
+            var activity = new List<bool>();
+            service.ToolActivityChanged += activity.Add;
+            await service.StartAsync(Context, CancellationToken.None);
+
+            transport.EmitFunctionCall(new FunctionCallRequest("get_weather", "call_1", "{\"location\":\"鈴鹿\"}"));
+            await Task.Yield();
+
+            Assert.That(invoker.Calls, Is.EqualTo(new[] { ("get_weather", "{\"location\":\"鈴鹿\"}") }));
+            Assert.That(transport.FunctionOutputs, Is.EqualTo(new[] { ("call_1", "鈴鹿は晴れ。") }));
+            Assert.That(activity, Is.EqualTo(new[] { true, false }));
+        }
+
+        [Test]
+        public async Task FunctionCall_WithNoInvoker_SendsAnUnavailableMessage()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider());
+            await service.StartAsync(Context, CancellationToken.None);
+
+            transport.EmitFunctionCall(new FunctionCallRequest("get_weather", "call_1", "{}"));
+            await Task.Yield();
+
+            Assert.That(transport.FunctionOutputs.Count, Is.EqualTo(1));
+            Assert.That(transport.FunctionOutputs[0].Output, Does.Contain("道具"));
+        }
+
+        [Test]
+        public async Task FunctionCall_WhenTheToolThrows_SendsAFallbackAndKeepsGoing()
+        {
+            var transport = new FakeTransport();
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(),
+                toolInvoker: new FakeToolInvoker(_ => throw new Exception("boom")));
+            await service.StartAsync(Context, CancellationToken.None);
+
+            transport.EmitFunctionCall(new FunctionCallRequest("get_weather", "call_1", "{}"));
+            await Task.Yield();
+
+            Assert.That(transport.FunctionOutputs.Count, Is.EqualTo(1));
+            Assert.That(transport.FunctionOutputs[0].Output, Does.Contain("調べられなかった"));
+        }
+
+        [Test]
+        public async Task FunctionCall_BeyondThePerTurnBudget_IsRefusedWithoutCallingTheTool()
+        {
+            var transport = new FakeTransport();
+            var invoker = new FakeToolInvoker("ok");
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(),
+                toolInvoker: invoker, maxToolCallsPerTurn: 2);
+            await service.StartAsync(Context, CancellationToken.None);
+
+            for (var i = 0; i < 3; i++)
+            {
+                transport.EmitFunctionCall(new FunctionCallRequest("get_weather", "call_" + i, "{}"));
+                await Task.Yield();
+            }
+
+            Assert.That(invoker.Calls.Count, Is.EqualTo(2));
+            Assert.That(transport.FunctionOutputs.Count, Is.EqualTo(3));
+            Assert.That(transport.FunctionOutputs[2].Output, Does.Contain("これ以上は"));
+
+            // A new user turn resets the budget.
+            transport.Emit(new RealtimeEvent(RealtimeEventKind.SpeechStarted, "input_audio_buffer.speech_started", "", "", "", "", "", ""));
+            transport.EmitFunctionCall(new FunctionCallRequest("get_weather", "call_x", "{}"));
+            await Task.Yield();
+            Assert.That(invoker.Calls.Count, Is.EqualTo(3));
+        }
+
+        [Test]
+        public async Task FunctionCall_AfterStop_IsIgnored()
+        {
+            var transport = new FakeTransport();
+            var invoker = new FakeToolInvoker("ok");
+            var service = CreateService(
+                new FakePermissionService(MicrophonePermissionStatus.Granted), transport, new FakeDelayProvider(),
+                toolInvoker: invoker);
+            await service.StartAsync(Context, CancellationToken.None);
+            await service.StopAsync(ConversationStopReason.UserRequested, CancellationToken.None);
+
+            transport.EmitFunctionCall(new FunctionCallRequest("get_weather", "call_1", "{}"));
+            await Task.Yield();
+
+            Assert.That(invoker.Calls, Is.Empty);
+        }
+
+        private sealed class FakeToolInvoker : IToolInvoker
+        {
+            private readonly Func<string, string> _respond;
+            public List<(string Name, string Args)> Calls { get; } = new List<(string, string)>();
+
+            public FakeToolInvoker(string result) : this(_ => result) { }
+            public FakeToolInvoker(Func<string, string> respond) => _respond = respond;
+
+            public Task<string> InvokeAsync(string name, string argumentsJson, CancellationToken cancellationToken)
+            {
+                Calls.Add((name, argumentsJson));
+                return Task.FromResult(_respond(argumentsJson));
+            }
+        }
+
         private static OpenAIRealtimeConversationService CreateService(
             IMicrophonePermissionService permission,
             IRealtimeConversationTransport transport,
             IConversationDelayProvider delay,
             TimeSpan? microphoneResumeGrace = null,
             TimeSpan? microphoneResumeFallbackGrace = null,
-            bool pushToTalk = false)
+            bool pushToTalk = false,
+            IToolInvoker toolInvoker = null,
+            int maxToolCallsPerTurn = 4)
         {
             // Tests default both microphone-resume graces to zero so the resume is synchronous and
             // deterministic; the timing itself is covered by dedicated tests.
@@ -686,7 +798,9 @@ namespace ObjecTalk.Tests.EditMode.Conversation
                 new ConversationStateMachine(), permission, transport, delay,
                 microphoneResumeGrace ?? TimeSpan.Zero,
                 microphoneResumeFallbackGrace ?? TimeSpan.Zero,
-                pushToTalk);
+                pushToTalk,
+                toolInvoker,
+                maxToolCallsPerTurn);
         }
 
         private static async Task AssertCanceledAsync(Func<Task> operation)

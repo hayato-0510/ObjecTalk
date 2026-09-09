@@ -271,6 +271,12 @@ namespace ObjecTalk.Tests.EditMode
                 remove { }
             }
 
+            public event Action<bool> ToolActivityChanged
+            {
+                add { }
+                remove { }
+            }
+
             public event Action<ConversationFailure> ErrorOccurred
             {
                 add { }

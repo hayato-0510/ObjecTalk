@@ -96,6 +96,16 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         // automatic echo-guard mute/unmute is skipped.
         private readonly bool _pushToTalk;
 
+        // Tool calling. Null invoker = tools disabled. The per-turn cap (reset when the user starts
+        // talking again) stops a model from looping tool -> response -> tool forever.
+        private const string ToolUnavailableMessage = "いま道具が使えないみたい。";
+        private const string ToolFailedMessage = "うまく調べられなかったよ。";
+        private const string ToolBudgetMessage = "これ以上は調べられないよ。";
+        private readonly IToolInvoker _toolInvoker;
+        private readonly int _maxToolCallsPerTurn;
+        private int _toolCallsThisTurn;
+        private Action<FunctionCallRequest> _functionCallHandler;
+
         public OpenAIRealtimeConversationService(
             ConversationStateMachine stateMachine,
             IMicrophonePermissionService microphonePermission,
@@ -103,7 +113,9 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             IConversationDelayProvider delayProvider,
             TimeSpan? microphoneResumeGrace = null,
             TimeSpan? microphoneResumeFallbackGrace = null,
-            bool pushToTalk = false)
+            bool pushToTalk = false,
+            IToolInvoker toolInvoker = null,
+            int maxToolCallsPerTurn = 4)
         {
             _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
             _microphonePermission = microphonePermission ?? throw new ArgumentNullException(nameof(microphonePermission));
@@ -112,6 +124,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             _microphoneResumeGrace = microphoneResumeGrace ?? DefaultMicrophoneResumeGrace;
             _microphoneResumeFallbackGrace = microphoneResumeFallbackGrace ?? DefaultMicrophoneResumeFallbackGrace;
             _pushToTalk = pushToTalk;
+            _toolInvoker = toolInvoker;
+            _maxToolCallsPerTurn = maxToolCallsPerTurn > 0 ? maxToolCallsPerTurn : 4;
             if (_microphoneResumeGrace < TimeSpan.Zero || _microphoneResumeFallbackGrace < TimeSpan.Zero)
             {
                 throw new ArgumentOutOfRangeException(nameof(microphoneResumeGrace));
@@ -191,6 +205,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         public event Action<string> AssistantTranscriptReceived;
 
         public event Action<ConversationFailure> ErrorOccurred;
+
+        public event Action<bool> ToolActivityChanged;
 
         public async Task StartAsync(ConversationContext context, CancellationToken cancellationToken)
         {
@@ -392,26 +408,37 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         private void SubscribeTransportEvents(long generation)
         {
             Action<RealtimeEvent> handler = realtimeEvent => HandleTransportEvent(realtimeEvent, generation);
+            Action<FunctionCallRequest> functionCallHandler = request => HandleFunctionCall(request, generation);
             lock (_sync)
             {
                 _transportEventHandler = handler;
+                _functionCallHandler = functionCallHandler;
                 _transportGeneration = generation;
             }
 
             _transport.EventReceived += handler;
+            _transport.FunctionCallReceived += functionCallHandler;
         }
 
         private void UnsubscribeTransportEvents(long generation)
         {
             Action<RealtimeEvent> handler = null;
+            Action<FunctionCallRequest> functionCallHandler = null;
             lock (_sync)
             {
                 if (_transportGeneration == generation)
                 {
                     handler = _transportEventHandler;
+                    functionCallHandler = _functionCallHandler;
                     _transportEventHandler = null;
+                    _functionCallHandler = null;
                     _transportGeneration = 0;
                 }
+            }
+
+            if (functionCallHandler != null)
+            {
+                _transport.FunctionCallReceived -= functionCallHandler;
             }
 
             if (handler != null)
@@ -430,6 +457,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             switch (realtimeEvent.Kind)
             {
                 case RealtimeEventKind.SpeechStarted:
+                    Interlocked.Exchange(ref _toolCallsThisTurn, 0);
                     if (CurrentState == ConversationState.Speaking)
                     {
                         InterruptAssistant(generation);
@@ -486,6 +514,75 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         {
             long until = Interlocked.Exchange(ref _responseCancelErrorSuppressedUntilTicks, 0);
             return until != 0 && DateTimeOffset.UtcNow.UtcTicks <= until;
+        }
+
+        private void HandleFunctionCall(FunctionCallRequest request, long generation)
+        {
+            if (request == null || !IsActiveGeneration(generation))
+            {
+                return;
+            }
+
+            if (Interlocked.Increment(ref _toolCallsThisTurn) > _maxToolCallsPerTurn)
+            {
+                RunToolCall(request, generation, budgetExceeded: true);
+                return;
+            }
+
+            RunToolCall(request, generation, budgetExceeded: false);
+        }
+
+        private async void RunToolCall(FunctionCallRequest request, long generation, bool budgetExceeded)
+        {
+            PublishEvent(() => ToolActivityChanged?.Invoke(true));
+            try
+            {
+                string result;
+                if (budgetExceeded)
+                {
+                    result = ToolBudgetMessage;
+                }
+                else if (_toolInvoker == null)
+                {
+                    result = ToolUnavailableMessage;
+                }
+                else
+                {
+                    try
+                    {
+                        result = await _toolInvoker.InvokeAsync(request.Name, request.Arguments, CancellationToken.None);
+                    }
+                    catch (Exception)
+                    {
+                        result = ToolFailedMessage;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    result = ToolFailedMessage;
+                }
+
+                if (!IsActiveGeneration(generation))
+                {
+                    return;
+                }
+
+                try
+                {
+                    await _transport.SendFunctionCallOutputAsync(request.CallId, result, CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    PublishFailure(CreateOperationFailure(
+                        "realtime_tool_output_failed",
+                        "調べた結果をうまく伝えられませんでした。"));
+                }
+            }
+            finally
+            {
+                PublishEvent(() => ToolActivityChanged?.Invoke(false));
+            }
         }
 
         private void SafeSetLocalAudioCaptureEnabled(bool enabled)

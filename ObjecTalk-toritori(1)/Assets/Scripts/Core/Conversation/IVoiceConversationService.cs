@@ -17,6 +17,10 @@ namespace ObjecTalk.Core.Conversation
 
         event Action<ConversationFailure> ErrorOccurred;
 
+        // Raised true while a tool call the model asked for is running, false when it finishes, so the
+        // UI can show a "調べているよ" indicator during the round-trip.
+        event Action<bool> ToolActivityChanged;
+
         Task StartAsync(ConversationContext context, CancellationToken cancellationToken);
 
         Task StopAsync(ConversationStopReason reason, CancellationToken cancellationToken);

@@ -451,8 +451,11 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
             public event Action<string> UserTranscriptReceived { add { } remove { } }
             public event Action<string> AssistantTranscriptReceived { add { } remove { } }
             public event Action<ConversationFailure> ErrorOccurred { add { } remove { } }
+            public event Action<bool> ToolActivityChanged;
 
             public void SetPushToTalkActive(bool active) => PushToTalkStates.Add(active);
+
+            public void PublishToolActivity(bool active) => ToolActivityChanged?.Invoke(active);
 
             public Task StartAsync(ConversationContext context, CancellationToken cancellationToken)
             {
