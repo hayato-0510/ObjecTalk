@@ -68,6 +68,11 @@ public class ObjectItem
     [Column("personality_prompt")]
     public string PersonalityPrompt { get; set; }
 
+    // Exhibition: seed objects (the 5-department showcase set) survive the visitor-registration
+    // wipe; objects registered by open-campus visitors are non-seed and get cleared periodically.
+    [Column("is_seed")]
+    public bool IsSeed { get; set; }
+
     //[Column("image_url")]
     //public string ImageURL { get; set; }
     [Ignore]
@@ -331,6 +336,40 @@ public class DatabaseManager : IDisposable
         {
             _connection.Rollback();
             Debug.LogError($"オブジェクトの削除中にエラーが発生しました: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 現在登録されている物体をすべてシード（展示用・削除対象外）にする。5学科の代表物体を
+    /// セットアップし終えた時点で1回呼ぶ運用を想定している。
+    /// </summary>
+    public void MarkAllObjectsAsSeed()
+    {
+        _connection.Execute("UPDATE objects SET is_seed = 1");
+        Debug.Log("すべての登録物体をシード（削除対象外）にしました。");
+    }
+
+    /// <summary>
+    /// 来場者が登録した物体（is_seed が 1 以外＝0 または未設定）と、その特徴の関連付け・認識
+    /// サンプルだけを削除する。シード物体、ユーザー行、features 行は残す。
+    /// </summary>
+    public void ClearVisitorRegistrations()
+    {
+        _connection.BeginTransaction();
+        try
+        {
+            const string visitorFilter = "(SELECT object_id FROM objects WHERE is_seed IS NOT 1)";
+            _connection.Execute($"DELETE FROM object_features WHERE object_id IN {visitorFilter}");
+            _connection.Execute($"DELETE FROM recognition_samples WHERE object_id IN {visitorFilter}");
+            _connection.Execute("DELETE FROM objects WHERE is_seed IS NOT 1");
+            _connection.Commit();
+            Debug.Log("来場者登録（物体・特徴の関連付け・認識サンプル）を削除しました。シード物体は保持します。");
+        }
+        catch (Exception ex)
+        {
+            _connection.Rollback();
+            Debug.LogError($"来場者登録の削除中にエラーが発生しました: {ex.Message}");
             throw;
         }
     }
