@@ -47,6 +47,59 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             return true;
         }
 
+        /// <summary>
+        /// Extracts the first <c>function_call</c> item from a <c>response.done</c> event. Returns
+        /// false for any other event, malformed JSON, or a response with no function call.
+        /// </summary>
+        public bool TryParseFunctionCall(string json, out FunctionCallRequest request)
+        {
+            request = null;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            JObject payload;
+            try
+            {
+                payload = JObject.Parse(json);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (ReadString(payload, "type") != RealtimeEventTypes.ResponseDone)
+            {
+                return false;
+            }
+
+            if (!(payload["response"]?["output"] is JArray output))
+            {
+                return false;
+            }
+
+            foreach (JToken item in output)
+            {
+                if (!(item is JObject obj) || ReadString(obj, "type") != "function_call")
+                {
+                    continue;
+                }
+
+                string name = ReadString(obj, "name");
+                string callId = ReadString(obj, "call_id");
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(callId))
+                {
+                    continue;
+                }
+
+                request = new FunctionCallRequest(name, callId, ReadString(obj, "arguments"));
+                return true;
+            }
+
+            return false;
+        }
+
         private static string ReadTranscript(JObject payload, RealtimeEventKind kind)
         {
             switch (kind)

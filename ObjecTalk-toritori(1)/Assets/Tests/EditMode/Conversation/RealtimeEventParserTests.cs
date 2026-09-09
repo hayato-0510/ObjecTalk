@@ -126,5 +126,49 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That(_parser.TryParse(json, out RealtimeEvent realtimeEvent), Is.False);
             Assert.That(realtimeEvent, Is.Null);
         }
+
+        [Test]
+        public void TryParseFunctionCall_ResponseDoneWithFunctionCall_ExtractsNameCallIdAndArguments()
+        {
+            const string json =
+                "{\"type\":\"response.done\",\"response\":{\"id\":\"resp-1\",\"output\":["
+                + "{\"type\":\"message\",\"role\":\"assistant\"},"
+                + "{\"type\":\"function_call\",\"name\":\"get_weather\",\"call_id\":\"call_abc\",\"arguments\":\"{\\\"location\\\":\\\"鈴鹿\\\"}\"}"
+                + "]}}";
+
+            Assert.That(_parser.TryParseFunctionCall(json, out FunctionCallRequest request), Is.True);
+            Assert.That(request.Name, Is.EqualTo("get_weather"));
+            Assert.That(request.CallId, Is.EqualTo("call_abc"));
+            Assert.That(request.Arguments, Is.EqualTo("{\"location\":\"鈴鹿\"}"));
+        }
+
+        [Test]
+        public void TryParseFunctionCall_ResponseDoneWithoutFunctionCall_ReturnsFalse()
+        {
+            const string json = "{\"type\":\"response.done\",\"response\":{\"id\":\"r\",\"output\":[{\"type\":\"message\"}]}}";
+
+            Assert.That(_parser.TryParseFunctionCall(json, out FunctionCallRequest request), Is.False);
+            Assert.That(request, Is.Null);
+        }
+
+        [TestCase("{\"type\":\"response.created\",\"response\":{\"output\":[{\"type\":\"function_call\",\"name\":\"x\",\"call_id\":\"c\"}]}}")]
+        [TestCase("{\"type\":\"response.done\"}")]
+        [TestCase("not json")]
+        [TestCase("")]
+        public void TryParseFunctionCall_NonMatching_ReturnsFalse(string json)
+        {
+            Assert.That(_parser.TryParseFunctionCall(json, out FunctionCallRequest request), Is.False);
+            Assert.That(request, Is.Null);
+        }
+
+        [Test]
+        public void TryParseFunctionCall_MissingArguments_DefaultsToEmptyObject()
+        {
+            const string json =
+                "{\"type\":\"response.done\",\"response\":{\"output\":[{\"type\":\"function_call\",\"name\":\"web_search\",\"call_id\":\"c1\"}]}}";
+
+            Assert.That(_parser.TryParseFunctionCall(json, out FunctionCallRequest request), Is.True);
+            Assert.That(request.Arguments, Is.EqualTo("{}"));
+        }
     }
 }

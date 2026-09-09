@@ -39,6 +39,26 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         ApiError
     }
 
+    /// <summary>
+    /// A tool call the model wants run, extracted from a <c>function_call</c> item in
+    /// <c>response.done</c>. The client executes it and returns a <c>function_call_output</c>.
+    /// </summary>
+    public sealed class FunctionCallRequest
+    {
+        public FunctionCallRequest(string name, string callId, string arguments)
+        {
+            Name = name ?? string.Empty;
+            CallId = callId ?? string.Empty;
+            Arguments = string.IsNullOrEmpty(arguments) ? "{}" : arguments;
+        }
+
+        public string Name { get; }
+
+        public string CallId { get; }
+
+        public string Arguments { get; }
+    }
+
     public sealed class RealtimeEvent
     {
         public RealtimeEvent(
