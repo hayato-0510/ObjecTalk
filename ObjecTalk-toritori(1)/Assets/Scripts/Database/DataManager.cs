@@ -294,6 +294,28 @@ public class DatabaseManager : IDisposable
         }
     }
 
+    // Debug reset that keeps the account: wipes every registered object and its recognition data
+    // but leaves the users table, so the single exhibition account stays logged in.
+    public void ClearRegistrationData()
+    {
+        _connection.BeginTransaction();
+        try
+        {
+            _connection.DeleteAll<ObjectFeature>();
+            _connection.Execute("DELETE FROM recognition_samples");
+            _connection.DeleteAll<ObjectItem>();
+            _connection.DeleteAll<Feature>();
+            _connection.Commit();
+            Debug.Log("登録データ（物体・特徴・認識サンプル）を削除しました。ユーザーは保持します。");
+        }
+        catch (Exception ex)
+        {
+            _connection.Rollback();
+            Debug.LogError($"登録データの削除中にエラーが発生しました: {ex.Message}");
+            throw;
+        }
+    }
+
     public void DeleteObject(string objectId)
     {
         _connection.BeginTransaction();

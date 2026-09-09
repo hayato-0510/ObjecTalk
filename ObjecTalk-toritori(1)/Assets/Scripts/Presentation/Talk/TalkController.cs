@@ -389,6 +389,10 @@ namespace ObjecTalk.Presentation.Talk
 
         private async void OnRecognitionChanged(RecognizedObjectState state)
         {
+            Debug.Log($"[TalkDiag] OnRecognitionChanged: IsRecognized={state?.IsRecognized}, "
+                + $"ObjectId={state?.ObjectId}, ObjectName={state?.ObjectName}, "
+                + $"CurrentUserId={recognitionSource?.CurrentUserId}");
+
             if (state != null && state.IsRecognized)
             {
                 view.SetCurrentObjectName(state.ObjectName);

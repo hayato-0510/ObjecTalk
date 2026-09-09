@@ -1,6 +1,7 @@
 using System;
 using ObjecTalk.Core.Conversation;
 using ObjecTalk.Domain.Conversation;
+using UnityEngine;
 
 namespace ObjecTalk.Infrastructure.Conversation
 {
@@ -19,21 +20,31 @@ namespace ObjecTalk.Infrastructure.Conversation
         {
             if (string.IsNullOrWhiteSpace(objectId))
             {
+                Debug.LogWarning("[TalkDiag] GetContext: objectId is blank.");
                 return null;
             }
 
             string currentUserId = _currentUserId();
             if (string.IsNullOrWhiteSpace(currentUserId))
             {
+                Debug.LogWarning($"[TalkDiag] GetContext({objectId}): currentUserId is blank (not logged in?).");
                 return null;
             }
 
             ObjectItem item = _database.GetObjectWithDetails(objectId);
-            if (item == null || !string.Equals(item.user_id, currentUserId, StringComparison.Ordinal))
+            if (item == null)
             {
+                Debug.LogWarning($"[TalkDiag] GetContext({objectId}): GetObjectWithDetails returned null.");
                 return null;
             }
 
+            if (!string.Equals(item.user_id, currentUserId, StringComparison.Ordinal))
+            {
+                Debug.LogWarning($"[TalkDiag] GetContext({objectId}): user_id mismatch, item.user_id={item.user_id} currentUserId={currentUserId}.");
+                return null;
+            }
+
+            Debug.Log($"[TalkDiag] GetContext({objectId}): OK, name={item.Name}, promptLength={(item.PersonalityPrompt ?? string.Empty).Length}.");
             return new ConversationContext(
                 item.object_id,
                 item.Name,

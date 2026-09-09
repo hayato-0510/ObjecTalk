@@ -118,6 +118,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     [Tooltip("撮影進捗のドット3個。左から撮影済みを点灯する。")]
     public Image[] registrationDots;
 
+    [Tooltip("撮影済みの写真を表示するサムネイル3枚（左から1枚目→3枚目）。撮影が受理されるたびに該当枠へ表示する。" +
+             "表示のみで、タップでの再撮影はできない。")]
+    public Image[] registrationThumbnails;
+
     [Tooltip("撮影の狙いを説明するテキスト。")]
     public TMP_Text registrationInstructionText;
 
@@ -125,6 +129,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     [Tooltip("中央クロップの唯一の基準値（短辺に対する割合）。embedding が実際に切り出す箱と、各カメラ面の" +
              "ガイド枠／緑マスクの両方をこの値が駆動する。ImageGeometry.DefaultCropFraction に合わせる。")]
     public float guideFractionOfPreview = ImageGeometry.DefaultCropFraction;
+
+    [Range(0.3f, 1f)]
+    [Tooltip("背景抑制マスクの半径（クロップ枠の内接円に対する割合）。この内側だけを埋め込み・AKAZE照合に渡し、" +
+             "外側は単色でつぶす。登録時と認識時に同じ値を使うことで、背景の写り込みによる誤認識/未認識を減らす。")]
+    public float backgroundMaskFraction = ImageGeometry.DefaultMaskFraction;
 
     [Tooltip("登録カメラプレビューの切り出しガイド（枠＋緑マスク）。CameraDisplay(reg) の子。")]
     public CropGuideOverlay cropOverlayRegister;
@@ -189,6 +198,13 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         new Dictionary<string, RegisteredObject>(StringComparer.Ordinal);
     private readonly RecognitionEventPublisher _recognitionEvents = new RecognitionEventPublisher();
     private Texture2D tempSnapshot;
+    // Captured synchronously when the shutter is pressed, before the async embedding run confirms
+    // whether the view was actually accepted. Promoted into tempSnapshot / a thumbnail slot on
+    // CaptureAccepted, or destroyed on any other outcome (Featureless/Unavailable/NotAccepting).
+    private Texture2D _pendingThumbnail;
+    // One thumbnail per required view, aligned by index (view 1 at [0], etc.). Slot 0 shares its
+    // texture with tempSnapshot rather than duplicating it.
+    private readonly Texture2D[] _registrationSnapshots = new Texture2D[RecognitionSettings.RequiredSamplesPerObject];
     private int currentEyeId = -1;
     private int currentMouthId = -1;
     private Vector2 tempRelativeEyePos = new Vector2(-1, -1);
@@ -225,10 +241,26 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     // Running capture-flash fade; see FlashCapture.
     private Coroutine _flashRoutine;
 
-    /// <summary>Leaves the camera flow: stops the camera and loads the home scene.</summary>
+    // --- Debug: wipe database ---
+    // A runtime-built button (no scene wiring, matching this scene's all-code-bound convention and
+    // TalkController.CreateRuntimePushToTalkButton). Tapping it swaps the button for an inline
+    // "delete everything?" confirm; confirming clears every table via DatabaseManager.ClearAllTables()
+    // and returns to the home scene so auth and the UI rebuild from an empty database. Update()
+    // rebuilds it lazily, so it survives this DontDestroyOnLoad singleton outliving its scene canvas.
+    private GameObject _debugWipeRoot;
+    private GameObject _debugWipeButtonGo;
+    private GameObject _debugWipeConfirmGo;
+    private bool _debugWipeInProgress;
+
+    /// <summary>
+    /// The "fin" button: ends the current visitor's session and reloads ObjectDetectionScene fresh,
+    /// so the next visitor starts from a clean scan-ready state without going back through the home
+    /// screen. A full scene reload (rather than just re-showing the selection panel) also drops all
+    /// recognition / conversation state.
+    /// </summary>
     public void ReturnToHome()
     {
-        Debug.Log("Returning to the home scene and stopping camera...");
+        Debug.Log("fin: reloading ObjectDetectionScene for the next session...");
 
         // Deactivating the root panel runs OnDisable, which stops the webcam.
         if (objectMatcherRootPanel != null)
@@ -240,7 +272,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             Debug.LogError("objectMatcherRootPanel is not set!");
         }
 
-        SceneManager.LoadScene(HomeSceneName);
+        SceneManager.LoadScene("ObjectDetectionScene");
     }
 
     void Awake()
@@ -304,7 +336,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         _preprocessor = new CameraFramePreprocessor(
             ImageGeometry.EmbeddingImageSize,
             ImageGeometry.MaximumVerificationImageSize,
-            guideFractionOfPreview);
+            guideFractionOfPreview,
+            backgroundMaskFraction);
         _verifier = BuildLocalFeatureVerifier();
         _extractor = new SentisEmbeddingExtractor();
 
@@ -756,6 +789,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
     void Update()
     {
+        EnsureDebugWipeButton();
+
         // Keep the upright frame current for the preview even when recognition is unavailable.
         if (webcamTexture != null && webcamTexture.didUpdateThisFrame)
         {
@@ -799,6 +834,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
             case RecognitionTickStatus.CaptureAccepted:
                 FlashCapture();
+                PromoteCapturedThumbnail(result.CapturedViewCount);
                 SetRegistrationProgress(result.CapturedViewCount);
                 if (result.CapturedViewCount >= RecognitionSettings.RequiredSamplesPerObject)
                 {
@@ -817,8 +853,181 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         }
     }
 
+    // --- Debug: wipe registered data ---------------------------------------------------------------
+    // Builds an always-visible "登録データ消去" button on the recognition panel and, on a two-step
+    // confirm, clears every registered object + its recognition samples (DatabaseManager
+    // .ClearRegistrationData) while keeping the users row so the single exhibition account stays
+    // logged in, then refreshes recognition in place. Everything is created in code so there is no
+    // scene edit or Inspector wiring, matching this scene's convention and TalkController's runtime
+    // button.
+
+    private void EnsureDebugWipeButton()
+    {
+        if (_debugWipeRoot != null || _debugWipeInProgress || objectMatcherRootPanel == null)
+        {
+            return;
+        }
+
+        _debugWipeRoot = new GameObject("DebugWipeDatabase", typeof(RectTransform));
+        var rootRect = (RectTransform)_debugWipeRoot.transform;
+        rootRect.SetParent(objectMatcherRootPanel.transform, false);
+        rootRect.anchorMin = new Vector2(0f, 1f);
+        rootRect.anchorMax = new Vector2(0f, 1f);
+        rootRect.pivot = new Vector2(0f, 1f);
+        rootRect.anchoredPosition = new Vector2(24f, -24f);
+        rootRect.sizeDelta = new Vector2(560f, 140f);
+        rootRect.SetAsLastSibling();
+
+        _debugWipeButtonGo = CreateDebugWipeButton(
+            rootRect, "登録データ消去", new Color(0.75f, 0.15f, 0.15f, 0.92f),
+            new Vector2(320f, 88f), new Vector2(0f, 0f), OnDebugWipeRequested);
+
+        _debugWipeConfirmGo = new GameObject("Confirm", typeof(RectTransform));
+        var confirmRect = (RectTransform)_debugWipeConfirmGo.transform;
+        confirmRect.SetParent(rootRect, false);
+        confirmRect.anchorMin = Vector2.zero;
+        confirmRect.anchorMax = Vector2.one;
+        confirmRect.offsetMin = Vector2.zero;
+        confirmRect.offsetMax = Vector2.zero;
+
+        CreateDebugWipeLabel(confirmRect, "登録した物体をすべて消します。よろしいですか？",
+            new Vector2(560f, 44f), new Vector2(0f, 0f));
+        CreateDebugWipeButton(confirmRect, "削除する", new Color(0.75f, 0.15f, 0.15f, 0.95f),
+            new Vector2(270f, 84f), new Vector2(0f, -50f), ConfirmDebugWipe);
+        CreateDebugWipeButton(confirmRect, "やめる", new Color(0.30f, 0.30f, 0.32f, 0.95f),
+            new Vector2(270f, 84f), new Vector2(290f, -50f), CancelDebugWipe);
+
+        _debugWipeConfirmGo.SetActive(false);
+    }
+
+    private static GameObject CreateDebugWipeButton(
+        Transform parent, string label, Color background, Vector2 size, Vector2 anchoredPos,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        var go = new GameObject(label,
+            typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Button));
+        var rect = (RectTransform)go.transform;
+        rect.SetParent(parent, false);
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = anchoredPos;
+
+        var image = go.GetComponent<Image>();
+        image.color = background;
+        image.raycastTarget = true;
+
+        go.GetComponent<Button>().onClick.AddListener(onClick);
+
+        var labelGo = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer));
+        var labelRect = (RectTransform)labelGo.transform;
+        labelRect.SetParent(rect, false);
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = new Vector2(8f, 4f);
+        labelRect.offsetMax = new Vector2(-8f, -4f);
+        try
+        {
+            var tmp = labelGo.AddComponent<TextMeshProUGUI>();
+            tmp.text = label;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.enableAutoSizing = true;
+            tmp.fontSizeMin = 16f;
+            tmp.fontSizeMax = 34f;
+            tmp.color = Color.white;
+            tmp.raycastTarget = false;
+        }
+        catch (Exception)
+        {
+            // A missing TMP font must not stop the button working; it just has no label.
+        }
+
+        return go;
+    }
+
+    private static void CreateDebugWipeLabel(Transform parent, string text, Vector2 size, Vector2 anchoredPos)
+    {
+        var go = new GameObject("Label", typeof(RectTransform), typeof(CanvasRenderer));
+        var rect = (RectTransform)go.transform;
+        rect.SetParent(parent, false);
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = anchoredPos;
+        try
+        {
+            var tmp = go.AddComponent<TextMeshProUGUI>();
+            tmp.text = text;
+            tmp.alignment = TextAlignmentOptions.Left;
+            tmp.enableAutoSizing = true;
+            tmp.fontSizeMin = 14f;
+            tmp.fontSizeMax = 26f;
+            tmp.color = Color.white;
+            tmp.raycastTarget = false;
+        }
+        catch (Exception)
+        {
+            // No font: the buttons still carry enough meaning on their own.
+        }
+    }
+
+    private void OnDebugWipeRequested()
+    {
+        if (_debugWipeButtonGo != null) _debugWipeButtonGo.SetActive(false);
+        if (_debugWipeConfirmGo != null) _debugWipeConfirmGo.SetActive(true);
+    }
+
+    private void CancelDebugWipe()
+    {
+        if (_debugWipeConfirmGo != null) _debugWipeConfirmGo.SetActive(false);
+        if (_debugWipeButtonGo != null) _debugWipeButtonGo.SetActive(true);
+    }
+
+    private void ConfirmDebugWipe()
+    {
+        if (_debugWipeInProgress)
+        {
+            return;
+        }
+
+        if (dbManager == null)
+        {
+            CancelDebugWipe();
+            SetStatusText("DBに接続できていないため消去できません。");
+            return;
+        }
+
+        _debugWipeInProgress = true;
+        try
+        {
+            dbManager.ClearRegistrationData();
+        }
+        catch (Exception e)
+        {
+            _debugWipeInProgress = false;
+            CancelDebugWipe();
+            SetStatusText($"登録データの消去に失敗しました: {e.Message}");
+            Debug.LogError($"Debug wipe failed: {e}");
+            return;
+        }
+
+        Debug.Log("Debug wipe: registered objects and samples cleared; refreshing recognition in place.");
+        LoadRegisteredObjects();
+        SetStatusText("登録データを消去しました。");
+        _debugWipeInProgress = false;
+        CancelDebugWipe();
+    }
+
     void OnDestroy()
     {
+        if (_debugWipeRoot != null)
+        {
+            Destroy(_debugWipeRoot);
+            _debugWipeRoot = null;
+        }
+
         DisposeRecognitionPipeline();
 
         if (webcamTexture != null)
@@ -943,20 +1152,44 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     /// relative positions. There is no bounding-box tracking, so the pieces sit at a fixed spot on
     /// the preview — correct as long as the object fills the guide square it was captured in.
     /// </summary>
+    // Objects whose registration skipped the eye/mouth placement step store (-1, -1) / style -1.
+    // Rather than showing no face at all, fall back to a centred default so every recognised object
+    // gets one (matches the placement a fully-registered object lands near).
+    private static readonly Vector2 DefaultRelativeEyePosition = new Vector2(0.5f, 0.54f);
+    private static readonly Vector2 DefaultRelativeMouthPosition = new Vector2(0.5f, 0.46f);
+
     private void ShowFaceOverlay(RegisteredObject obj)
     {
         if (DesiredMode != StartupMode.Talk || talkCameraDisplay == null)
         {
+            Debug.LogWarning($"[FaceDiag] ShowFaceOverlay early-out: DesiredMode={DesiredMode}, "
+                + $"talkCameraDisplay={(talkCameraDisplay == null ? "NULL" : "ok")}, "
+                + $"eyeImg={(recognitionEyeImage == null ? "NULL" : "ok")}, "
+                + $"mouthImg={(recognitionMouthImage == null ? "NULL" : "ok")}, "
+                + $"eyeStyles={(eyeStyles == null ? "NULL" : eyeStyles.Count.ToString())}, "
+                + $"mouthStyles={(mouthStyles == null ? "NULL" : mouthStyles.Count.ToString())}.");
             HideFaceOverlay();
             return;
         }
 
         var previewRect = talkCameraDisplay.rectTransform.rect;
-        PlaceOverlayPiece(recognitionEyeImage, eyeStyles, obj.EyeStyleId,
-            obj.RelativeEyePosition, overlayEyeFraction, previewRect);
-        PlaceOverlayPiece(recognitionMouthImage, mouthStyles, obj.MouthStyleId,
-            obj.RelativeMouthPosition, overlayMouthFraction, previewRect);
+
+        Vector2 eyePos = IsPlaced(obj.RelativeEyePosition) ? obj.RelativeEyePosition : DefaultRelativeEyePosition;
+        Vector2 mouthPos = IsPlaced(obj.RelativeMouthPosition) ? obj.RelativeMouthPosition : DefaultRelativeMouthPosition;
+        int eyeStyle = obj.EyeStyleId >= 0 ? obj.EyeStyleId : 0;
+        int mouthStyle = obj.MouthStyleId >= 0 ? obj.MouthStyleId : 0;
+
+        Debug.Log($"[FaceDiag] ShowFaceOverlay: eyePos={eyePos} (placed={IsPlaced(obj.RelativeEyePosition)}) "
+            + $"mouthPos={mouthPos} eyeStyle={eyeStyle} mouthStyle={mouthStyle} "
+            + $"rect={previewRect.width}x{previewRect.height} "
+            + $"eyeStyles={(eyeStyles == null ? "NULL" : eyeStyles.Count.ToString())} "
+            + $"mouthStyles={(mouthStyles == null ? "NULL" : mouthStyles.Count.ToString())}.");
+
+        PlaceOverlayPiece(recognitionEyeImage, eyeStyles, eyeStyle, eyePos, overlayEyeFraction, previewRect);
+        PlaceOverlayPiece(recognitionMouthImage, mouthStyles, mouthStyle, mouthPos, overlayMouthFraction, previewRect);
     }
+
+    private static bool IsPlaced(Vector2 relative) => relative.x >= 0f && relative.y >= 0f;
 
     private static void PlaceOverlayPiece(Image image, List<Sprite> styles, int styleId,
         Vector2 relative, float fraction, Rect previewRect)
@@ -972,6 +1205,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
                          && previewRect.width > 0f && previewRect.height > 0f;
         if (!placeable)
         {
+            Debug.LogWarning($"[FaceDiag] PlaceOverlayPiece not placeable: styleId={styleId}, "
+                + $"styles={(styles == null ? "NULL" : styles.Count.ToString())}, "
+                + $"styleOk={(styles != null && styleId >= 0 && styleId < styles.Count && styles[styleId] != null)}, "
+                + $"relative={relative}, rect={previewRect.width}x{previewRect.height}.");
             image.gameObject.SetActive(false);
             return;
         }
@@ -1116,36 +1353,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             BeginRegistrationSession();
         }
 
-        // The first view is the one the user places the face on, so keep its snapshot. It must
-        // match the upright frame the recognition sees, so read it from ActiveCameraFrame().
-        if (tempSnapshot == null)
+        // Captured up front for every attempt (not just the first) so a thumbnail is available
+        // whichever view this turns out to be. It must match the upright frame the recognition
+        // sees, so it reads from ActiveCameraFrame(). Only promoted into tempSnapshot / a thumbnail
+        // slot once CaptureAccepted confirms the view below; discarded otherwise.
+        DestroyThumbnail(ref _pendingThumbnail);
+        _pendingThumbnail = CaptureActiveFrameSnapshot();
+        if (_pendingThumbnail == null)
         {
-            try
-            {
-                var active = ActiveCameraFrame();
-                var readable = RenderTexture.GetTemporary(active.width, active.height, 0, RenderTextureFormat.ARGB32);
-                var previousActive = RenderTexture.active;
-                try
-                {
-                    Graphics.Blit(active, readable);
-                    RenderTexture.active = readable;
-                    tempSnapshot = new Texture2D(readable.width, readable.height, TextureFormat.RGB24, false);
-                    tempSnapshot.ReadPixels(new UnityEngine.Rect(0, 0, readable.width, readable.height), 0, 0);
-                    tempSnapshot.Apply();
-                }
-                finally
-                {
-                    RenderTexture.active = previousActive;
-                    RenderTexture.ReleaseTemporary(readable);
-                }
-                Debug.Log("Snapshot taken.");
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"Error taking snapshot: {e.Message}");
-                DestroySnapshot();
-                return;
-            }
+            SetStatusText(RecognitionMessages.CameraUnavailable);
+            return;
         }
 
         var status = _recognitionService.CaptureRegistrationView(ActiveCameraFrame());
@@ -1157,17 +1374,85 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
                 break;
 
             case RegistrationCaptureStatus.Featureless:
+                DestroyThumbnail(ref _pendingThumbnail);
                 SetStatusText(RecognitionMessages.RegistrationRetry);
                 break;
 
             case RegistrationCaptureStatus.Unavailable:
+                DestroyThumbnail(ref _pendingThumbnail);
                 SetStatusText(RecognitionMessages.RecognitionUnavailable);
                 break;
 
             case RegistrationCaptureStatus.NotAccepting:
+                DestroyThumbnail(ref _pendingThumbnail);
                 EnterPlacementFromCaptures();
                 break;
         }
+    }
+
+    /// <summary>
+    /// Reads <see cref="ActiveCameraFrame"/> into a brand-new RGB24 <see cref="Texture2D"/>, or null
+    /// if the graphics device could not service the read this frame. The caller owns the result.
+    /// </summary>
+    private Texture2D CaptureActiveFrameSnapshot()
+    {
+        try
+        {
+            var active = ActiveCameraFrame();
+            var readable = RenderTexture.GetTemporary(active.width, active.height, 0, RenderTextureFormat.ARGB32);
+            var previousActive = RenderTexture.active;
+            Texture2D snapshot;
+            try
+            {
+                Graphics.Blit(active, readable);
+                RenderTexture.active = readable;
+                snapshot = new Texture2D(readable.width, readable.height, TextureFormat.RGB24, false);
+                snapshot.ReadPixels(new UnityEngine.Rect(0, 0, readable.width, readable.height), 0, 0);
+                snapshot.Apply();
+            }
+            finally
+            {
+                RenderTexture.active = previousActive;
+                RenderTexture.ReleaseTemporary(readable);
+            }
+            return snapshot;
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error taking snapshot: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Moves the pending snapshot into the confirmed slot for the view <see cref="Update"/> just
+    /// learned was accepted: the first accepted view also becomes <see cref="tempSnapshot"/> (the
+    /// naming/placement/DB image), and every accepted view fills its thumbnail slot. Ownership of
+    /// the pending texture transfers here; nothing else may destroy it afterwards.
+    /// </summary>
+    private void PromoteCapturedThumbnail(int capturedViewCount)
+    {
+        var snapshot = _pendingThumbnail;
+        _pendingThumbnail = null;
+        if (snapshot == null)
+        {
+            Debug.LogWarning("A capture was accepted but no pending snapshot was kept for its thumbnail.");
+            return;
+        }
+
+        if (tempSnapshot == null)
+        {
+            tempSnapshot = snapshot;
+        }
+
+        var index = capturedViewCount - 1;
+        if (index < 0 || index >= _registrationSnapshots.Length)
+        {
+            return;
+        }
+
+        _registrationSnapshots[index] = snapshot;
+        ShowRegistrationThumbnail(index, snapshot);
     }
 
     private void EnterPlacementFromCaptures()
@@ -1707,8 +1992,26 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         }
     }
 
+    /// <summary>
+    /// Clears every image the current registration session holds: the pending (unconfirmed)
+    /// capture, all three thumbnail slots, and <see cref="tempSnapshot"/>. Slot 0 shares its texture
+    /// with tempSnapshot, so it is skipped here to avoid a double-destroy.
+    /// </summary>
     private void DestroySnapshot()
     {
+        DestroyThumbnail(ref _pendingThumbnail);
+
+        for (var i = 0; i < _registrationSnapshots.Length; i++)
+        {
+            var snapshot = _registrationSnapshots[i];
+            if (snapshot != null && snapshot != tempSnapshot)
+            {
+                Destroy(snapshot);
+            }
+            _registrationSnapshots[i] = null;
+            HideRegistrationThumbnail(i);
+        }
+
         if (tempSnapshot == null)
         {
             return;
@@ -1716,6 +2019,61 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
         Destroy(tempSnapshot);
         tempSnapshot = null;
+    }
+
+    private static void DestroyThumbnail(ref Texture2D texture)
+    {
+        if (texture == null)
+        {
+            return;
+        }
+
+        Destroy(texture);
+        texture = null;
+    }
+
+    /// <summary>
+    /// Shows the crop the recognition pipeline actually kept (matching the naming-screen preview),
+    /// not the raw uncropped frame, so the thumbnail reads as "what got registered".
+    /// </summary>
+    private void ShowRegistrationThumbnail(int index, Texture2D snapshot)
+    {
+        if (registrationThumbnails == null || index < 0 || index >= registrationThumbnails.Length)
+        {
+            return;
+        }
+
+        var image = registrationThumbnails[index];
+        if (image == null || snapshot == null)
+        {
+            return;
+        }
+
+        var crop = ImageGeometry.CenterCrop(snapshot.width, snapshot.height, guideFractionOfPreview);
+        image.sprite = Sprite.Create(
+            snapshot,
+            new UnityEngine.Rect(crop.X, crop.Y, crop.Width, crop.Height),
+            new Vector2(0.5f, 0.5f));
+        image.color = Color.white;
+        FitGraphicAspect(image, crop.Width / (float)crop.Height);
+        image.gameObject.SetActive(true);
+    }
+
+    private void HideRegistrationThumbnail(int index)
+    {
+        if (registrationThumbnails == null || index < 0 || index >= registrationThumbnails.Length)
+        {
+            return;
+        }
+
+        var image = registrationThumbnails[index];
+        if (image == null)
+        {
+            return;
+        }
+
+        image.sprite = null;
+        image.gameObject.SetActive(false);
     }
     #endregion
 }

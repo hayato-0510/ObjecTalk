@@ -12,9 +12,17 @@ namespace ObjecTalk.Infrastructure.Vision
     /// </summary>
     public sealed class CameraFramePreprocessor : IFramePreprocessor
     {
+        // Every full-screen blit this class does (embedding prep and verification-frame copy) is
+        // masked through the same shader/material, so registration and recognition always see an
+        // identically shaped object-only disc rather than two independently-cropped squares.
+        private const string MaskShaderName = "Hidden/ObjecTalk/CircularMask";
+        private static readonly Color MaskFillColor = new Color(0.5f, 0.5f, 0.5f, 1f);
+        private const float MaskFeatherWidth = 0.01f;
+
         private readonly int _embeddingSize;
         private readonly int _maximumVerificationSize;
         private readonly float _cropFraction;
+        private readonly float _maskRadius;
 
         private RenderTexture _embeddingTexture;
         private RenderTexture _verificationSurface;
@@ -22,20 +30,33 @@ namespace ObjecTalk.Infrastructure.Vision
         private int _verificationSize;
         private bool _disposed;
 
+        private Material _maskMaterial;
+        // One-shot so a missing shader (e.g. not yet added to Always Included Shaders in a device
+        // build) does not spam the log every recognition cycle; masking is skipped gracefully rather
+        // than throwing, matching this codebase's fail-soft rendering conventions elsewhere.
+        private bool _warnedNoMaskMaterial;
+
         public CameraFramePreprocessor()
             : this(
                 ImageGeometry.EmbeddingImageSize,
                 ImageGeometry.MaximumVerificationImageSize,
-                ImageGeometry.DefaultCropFraction)
+                ImageGeometry.DefaultCropFraction,
+                ImageGeometry.DefaultMaskFraction)
         {
         }
 
         public CameraFramePreprocessor(int embeddingSize, int maximumVerificationSize)
-            : this(embeddingSize, maximumVerificationSize, ImageGeometry.DefaultCropFraction)
+            : this(embeddingSize, maximumVerificationSize, ImageGeometry.DefaultCropFraction, ImageGeometry.DefaultMaskFraction)
         {
         }
 
         public CameraFramePreprocessor(int embeddingSize, int maximumVerificationSize, float cropFraction)
+            : this(embeddingSize, maximumVerificationSize, cropFraction, ImageGeometry.DefaultMaskFraction)
+        {
+        }
+
+        public CameraFramePreprocessor(
+            int embeddingSize, int maximumVerificationSize, float cropFraction, float maskFraction)
         {
             if (embeddingSize <= 0)
             {
@@ -59,6 +80,7 @@ namespace ObjecTalk.Infrastructure.Vision
             _embeddingSize = embeddingSize;
             _maximumVerificationSize = maximumVerificationSize;
             _cropFraction = cropFraction;
+            _maskRadius = CircularMaskLayout.NormalizedRadius(maskFraction);
         }
 
         /// <summary>Side length of the square handed to the embedding model.</summary>
@@ -129,6 +151,8 @@ namespace ObjecTalk.Infrastructure.Vision
             DestroyObject(_verificationFrame);
             _verificationFrame = null;
             _verificationSize = 0;
+            DestroyObject(_maskMaterial);
+            _maskMaterial = null;
         }
 
         // The concrete return type is more useful to direct callers than the interface's Texture,
@@ -151,15 +175,67 @@ namespace ObjecTalk.Infrastructure.Vision
             DestroyObject(_verificationFrame);
             _verificationFrame = null;
             _verificationSize = 0;
+            DestroyObject(_maskMaterial);
+            _maskMaterial = null;
         }
 
-        private static void Blit(Texture source, RenderTexture destination, NormalizedRect crop)
+        /// <summary>
+        /// Crops <paramref name="source"/> into <paramref name="destination"/> and, whenever the mask
+        /// material could be built, blanks everything outside the centred keep-circle in the same
+        /// pass. Falls back to a plain crop blit (no masking) if the shader could not be found, so a
+        /// build missing it from Always Included Shaders degrades gracefully instead of throwing.
+        /// </summary>
+        private void Blit(Texture source, RenderTexture destination, NormalizedRect crop)
         {
-            Graphics.Blit(
-                source,
-                destination,
-                new Vector2(crop.ScaleX, crop.ScaleY),
-                new Vector2(crop.OffsetX, crop.OffsetY));
+            var material = MaskMaterial();
+            if (material == null)
+            {
+                Graphics.Blit(
+                    source,
+                    destination,
+                    new Vector2(crop.ScaleX, crop.ScaleY),
+                    new Vector2(crop.OffsetX, crop.OffsetY));
+                return;
+            }
+
+            material.mainTexture = source;
+            material.mainTextureScale = new Vector2(crop.ScaleX, crop.ScaleY);
+            material.mainTextureOffset = new Vector2(crop.OffsetX, crop.OffsetY);
+            Graphics.Blit(source, destination, material);
+        }
+
+        /// <summary>
+        /// Builds the circular-mask material on first use. Returns null (rather than throwing) when
+        /// the shader cannot be resolved, which callers treat as "masking unavailable this run".
+        /// </summary>
+        private Material MaskMaterial()
+        {
+            if (_maskMaterial != null)
+            {
+                return _maskMaterial;
+            }
+
+            var shader = Shader.Find(MaskShaderName);
+            if (shader == null)
+            {
+                if (!_warnedNoMaskMaterial)
+                {
+                    Debug.LogWarning(
+                        $"CameraFramePreprocessor: shader '{MaskShaderName}' was not found "
+                        + "(is it in Always Included Shaders?); frames will not be background-masked.");
+                    _warnedNoMaskMaterial = true;
+                }
+                return null;
+            }
+
+            _maskMaterial = new Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            _maskMaterial.SetColor("_FillColor", MaskFillColor);
+            _maskMaterial.SetFloat("_MaskRadius", _maskRadius);
+            _maskMaterial.SetFloat("_FeatherWidth", MaskFeatherWidth);
+            return _maskMaterial;
         }
 
         private void EnsureEmbeddingTexture()

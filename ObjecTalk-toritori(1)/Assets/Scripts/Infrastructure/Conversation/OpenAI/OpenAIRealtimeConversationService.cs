@@ -221,14 +221,17 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 try
                 {
                     permission = await _microphonePermission.RequestAsync(operationToken);
+                    UnityEngine.Debug.Log($"[TalkDiag] StartAsync: microphone permission = {permission}.");
                 }
                 catch (OperationCanceledException) when (operationToken.IsCancellationRequested)
                 {
+                    UnityEngine.Debug.LogWarning("[TalkDiag] StartAsync: microphone permission request cancelled.");
                     FinishSession(generation);
                     throw;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    UnityEngine.Debug.LogWarning($"[TalkDiag] StartAsync: microphone permission request threw: {ex}");
                     PublishFailure(CreateOperationFailure(
                         "microphone_permission_failed",
                         "マイクの利用を確認できませんでした。もう一度お試しください。"));
@@ -238,11 +241,13 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
 
                 if (permission != MicrophonePermissionStatus.Granted)
                 {
+                    UnityEngine.Debug.LogWarning($"[TalkDiag] StartAsync: permission not granted ({permission}); publishing failure and stopping.");
                     PublishFailure(CreatePermissionFailure(permission));
                     FinishSession(generation);
                     return;
                 }
 
+                UnityEngine.Debug.Log("[TalkDiag] StartAsync: permission granted, connecting transport.");
                 TryPublishState(ConversationState.Connecting, generation);
                 for (int attempt = 0; ; attempt++)
                 {

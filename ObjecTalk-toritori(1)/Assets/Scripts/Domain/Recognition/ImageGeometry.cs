@@ -117,6 +117,13 @@ namespace ObjecTalk.Domain.Recognition
         /// <summary>Fraction of the short side kept by the registration/recognition center crop.</summary>
         public const float DefaultCropFraction = 0.75f;
 
+        /// <summary>
+        /// Default fraction fed to <see cref="CircularMaskLayout.NormalizedRadius"/>: how much of the
+        /// crop square's incircle the background-suppression mask keeps. Applied identically at
+        /// registration and recognition so both sides see the same object-only disc.
+        /// </summary>
+        public const float DefaultMaskFraction = 0.85f;
+
         /// <summary>Upper bound for the CPU-readable image handed to AKAZE.</summary>
         public const int MaximumVerificationImageSize = 320;
 
