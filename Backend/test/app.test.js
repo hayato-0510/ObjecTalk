@@ -219,3 +219,61 @@ function rawRequest(base, headers, body) {
     request.end(body);
   });
 }
+
+test('the tool route is absent unless an invoker is configured', async () => {
+  await withServer(dependencies(), async (base) => {
+    const response = await fetch(`${base}/api/tools/invoke`, {
+      method: 'POST', headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'get_weather', arguments: '{}' }),
+    });
+    assert.equal(response.status, 404);
+  });
+});
+
+test('the tool route requires authentication', async () => {
+  let calls = 0;
+  await withServer(dependencies({ invokeTool: async () => { calls++; return 'x'; } }), async (base) => {
+    const response = await fetch(`${base}/api/tools/invoke`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'get_weather', arguments: '{}' }),
+    });
+    assert.equal(response.status, 401);
+    assert.equal(calls, 0);
+  });
+});
+
+test('the tool route forwards name and arguments and returns the output', async () => {
+  let seen;
+  await withServer(dependencies({ invokeTool: async (name, args) => { seen = { name, args }; return '鈴鹿は晴れ。'; } }), async (base) => {
+    const response = await fetch(`${base}/api/tools/invoke`, {
+      method: 'POST', headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'get_weather', arguments: '{"location":"鈴鹿"}' }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { output: '鈴鹿は晴れ。' });
+    assert.equal(seen.name, 'get_weather');
+    assert.equal(seen.args, '{"location":"鈴鹿"}');
+  });
+});
+
+test('an unknown tool (invoker throws TypeError) is a 400', async () => {
+  await withServer(dependencies({ invokeTool: async () => { throw new TypeError('unknown tool'); } }), async (base) => {
+    const response = await fetch(`${base}/api/tools/invoke`, {
+      method: 'POST', headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'nope', arguments: '{}' }),
+    });
+    assert.equal(response.status, 400);
+  });
+});
+
+test('a bad tool body is a 400', async () => {
+  await withServer(dependencies({ invokeTool: async () => 'x' }), async (base) => {
+    for (const body of [{ name: '' }, { name: 'a'.repeat(41) }, { name: 'x', arguments: 5 }]) {
+      const response = await fetch(`${base}/api/tools/invoke`, {
+        method: 'POST', headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 400, JSON.stringify(body));
+    }
+  });
+});

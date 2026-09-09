@@ -11,6 +11,7 @@ export function createApp({
   verifyIdToken,
   createRealtimeCall,
   voicePools,
+  invokeTool,
   limiter = createInMemoryLimiter(),
   dailyBudget = createDailyBudget(),
 }) {
@@ -21,21 +22,41 @@ export function createApp({
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
   app.get('/health', (_req, res) => res.json({ status: 'ok' }));
-  app.post('/api/realtime/calls', async (req, res) => {
+
+  // Resolves the caller's uid or sends the 401/429 itself and returns null. Shared by every
+  // authenticated route so the header-strictness and verification stay identical.
+  async function authenticate(req, res) {
     if (countRawHeaders(req.rawHeaders, 'authorization') !== 1) {
-      return res.status(401).json({ error: 'unauthorized' });
+      res.status(401).json({ error: 'unauthorized' });
+      return null;
     }
     const token = extractBearerToken(req.get('authorization'));
-    if (!token) return res.status(401).json({ error: 'unauthorized' });
+    if (!token) {
+      res.status(401).json({ error: 'unauthorized' });
+      return null;
+    }
     let identity;
     try {
       identity = await verifyIdToken(token);
     } catch (error) {
       console.error('token verification failed:', error?.code ?? error?.message);
-      return res.status(401).json({ error: 'unauthorized' });
+      res.status(401).json({ error: 'unauthorized' });
+      return null;
     }
-    if (!identity?.uid) return res.status(401).json({ error: 'unauthorized' });
-    if (!limiter(identity.uid, req.ip ?? 'unknown')) return res.status(429).json({ error: 'rate_limited' });
+    if (!identity?.uid) {
+      res.status(401).json({ error: 'unauthorized' });
+      return null;
+    }
+    if (!limiter(identity.uid, req.ip ?? 'unknown')) {
+      res.status(429).json({ error: 'rate_limited' });
+      return null;
+    }
+    return identity;
+  }
+
+  app.post('/api/realtime/calls', async (req, res) => {
+    const identity = await authenticate(req, res);
+    if (!identity) return undefined;
     if (!dailyBudget.tryConsume()) return res.status(402).json({ error: 'daily_budget_exhausted' });
     try {
       const input = validateBody(req.body);
@@ -54,6 +75,25 @@ export function createApp({
       return res.status(502).json({ error: 'realtime_unavailable' });
     }
   });
+
+  if (typeof invokeTool === 'function') {
+    app.post('/api/tools/invoke', async (req, res) => {
+      const identity = await authenticate(req, res);
+      if (!identity) return undefined;
+      try {
+        const { name, args } = validateToolBody(req.body);
+        const output = await invokeTool(name, args);
+        return res.json({ output });
+      } catch (error) {
+        if (error instanceof TypeError || error instanceof RangeError) {
+          return res.status(400).json({ error: 'invalid_request' });
+        }
+        console.error('tool invoke failed:', error?.message);
+        return res.status(502).json({ error: 'tool_unavailable' });
+      }
+    });
+  }
+
   app.use((error, _req, res, _next) => {
     if (error?.type === 'entity.too.large' || error instanceof SyntaxError) {
       return res.status(400).json({ error: 'invalid_request' });
@@ -84,6 +124,17 @@ function validateBody(body) {
   if (mode !== undefined && mode !== 'exhibition') throw new RangeError('mode');
   const category = optionalCategory(body.category);
   return { objectId, objectName, personalityPrompt, language, sdp, mode, category };
+}
+
+function validateToolBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new TypeError('body');
+  const name = bounded(body.name, 'name', 1, 40);
+  const args = body.arguments;
+  if (args !== undefined && typeof args !== 'string' && (typeof args !== 'object' || args === null)) {
+    throw new TypeError('arguments');
+  }
+  // The tool arguments (place names, search queries) are never logged.
+  return { name, args };
 }
 
 function optionalCategory(value) {
