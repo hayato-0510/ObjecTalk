@@ -268,6 +268,25 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
         }
 
         [UnityTest]
+        public IEnumerator TalkController_ShowsAndClearsTheToolActivityIndicator()
+        {
+            var fixture = CreateTalkFixture();
+            var status = fixture.Root.GetComponent<TextMeshProUGUI>();
+            fixture.Root.SetActive(true);
+
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+
+            fixture.Voice.PublishToolActivity(true);
+            Assert.That(status.text, Is.EqualTo("調べているよ…"));
+
+            fixture.Voice.PublishToolActivity(false);
+            Assert.That(status.text, Is.EqualTo("聞いています"));
+
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
+        [UnityTest]
         public IEnumerator TalkController_ShowsNoPrompts_ForAnObjectWithoutAKnownCategory()
         {
             var fixture = CreateTalkFixture();

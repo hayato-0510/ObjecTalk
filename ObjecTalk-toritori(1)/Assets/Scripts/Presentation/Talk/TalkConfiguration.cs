@@ -25,6 +25,10 @@ namespace ObjecTalk.Presentation.Talk
         [Tooltip("1組あたりの会話の上限秒数。0 で無制限。展示で回転と料金を管理したいとき使う。")]
         [SerializeField] private float sessionMaxSeconds;
 
+        [Tooltip("オン（既定）: 天気・Web検索ツールを有効にし、モデルが必要に応じて自動で呼ぶ。" +
+                 "バックエンドの /api/tools/invoke を使う。")]
+        [SerializeField] private bool toolsEnabled = true;
+
         public TimeSpan RecognitionLossGrace => TimeSpan.FromSeconds(recognitionLossGraceSeconds);
         public TimeSpan ObjectSwitchConfirmation => TimeSpan.FromSeconds(objectSwitchConfirmationSeconds);
         public string Language => string.IsNullOrWhiteSpace(language) ? "ja" : language.Trim();
@@ -32,6 +36,7 @@ namespace ObjecTalk.Presentation.Talk
         public bool ExhibitionMode => exhibitionMode;
         public bool HandsFree => handsFree;
         public float SessionMaxSeconds => Mathf.Max(0f, sessionMaxSeconds);
+        public bool ToolsEnabled => toolsEnabled;
 
         public string ResolveBackendBaseUrl()
         {

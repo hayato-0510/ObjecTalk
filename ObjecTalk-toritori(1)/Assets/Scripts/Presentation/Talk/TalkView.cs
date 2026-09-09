@@ -11,6 +11,8 @@ namespace ObjecTalk.Presentation.Talk
         [SerializeField] private TMP_Text statusText;
         [SerializeField] private TMP_Text transcriptText;
         private string currentObjectName = string.Empty;
+        private ConversationState lastState = ConversationState.Idle;
+        private bool toolActive;
 
         // Read-aloud question prompts for the recognised object's category. Display only — no tap
         // handling. Built under the Talk canvas when there is one, otherwise under this component so
@@ -110,7 +112,9 @@ namespace ObjecTalk.Presentation.Talk
 
         public void ShowState(ConversationState state)
         {
-            if (statusText != null)
+            lastState = state;
+
+            if (statusText != null && !toolActive)
             {
                 statusText.text = MapState(state);
             }
@@ -119,6 +123,21 @@ namespace ObjecTalk.Presentation.Talk
             {
                 transcriptText.text = string.Empty;
             }
+        }
+
+        /// <summary>
+        /// While a tool the model asked for is running, the status line reads "調べているよ…"; when it
+        /// finishes, the normal state text comes back.
+        /// </summary>
+        public void ShowToolActivity(bool active)
+        {
+            toolActive = active;
+            if (statusText == null)
+            {
+                return;
+            }
+
+            statusText.text = active ? "調べているよ…" : MapState(lastState);
         }
 
         public void ShowFailure(ConversationFailure failure)

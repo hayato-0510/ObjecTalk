@@ -188,12 +188,19 @@ namespace ObjecTalk.Presentation.Talk
                     new RealtimeCallSdpExchange(callClient),
                     microphoneSource,
                     ResolveRemoteAudioSource());
+                IToolInvoker toolInvoker = configuration.ToolsEnabled
+                    ? new BackendToolInvoker(
+                        configuration.ResolveBackendBaseUrl(),
+                        new FirebaseIdTokenProvider(),
+                        new UnityWebRequestRealtimeHttpClient())
+                    : null;
                 voiceService = new OpenAIRealtimeConversationService(
                     new ConversationStateMachine(),
                     new MicrophonePermissionService(),
                     transport,
                     new TaskDelayProvider(),
-                    pushToTalk: !configuration.HandsFree);
+                    pushToTalk: !configuration.HandsFree,
+                    toolInvoker: toolInvoker);
                 coordinator = new ObjectConversationCoordinator(
                     new SystemClock(),
                     repository,
@@ -378,6 +385,7 @@ namespace ObjecTalk.Presentation.Talk
             voiceService.UserTranscriptReceived += OnTranscriptReceived;
             voiceService.AssistantTranscriptReceived += OnTranscriptReceived;
             voiceService.ErrorOccurred += OnFailure;
+            voiceService.ToolActivityChanged += OnToolActivityChanged;
             SceneManager.sceneUnloaded += OnSceneUnloaded;
             subscribed = true;
         }
@@ -395,6 +403,7 @@ namespace ObjecTalk.Presentation.Talk
             voiceService.UserTranscriptReceived -= OnTranscriptReceived;
             voiceService.AssistantTranscriptReceived -= OnTranscriptReceived;
             voiceService.ErrorOccurred -= OnFailure;
+            voiceService.ToolActivityChanged -= OnToolActivityChanged;
             SceneManager.sceneUnloaded -= OnSceneUnloaded;
             subscribed = false;
         }
@@ -518,6 +527,8 @@ namespace ObjecTalk.Presentation.Talk
         }
 
         private void OnTranscriptReceived(string transcript) => view?.ShowTranscript(transcript);
+
+        private void OnToolActivityChanged(bool active) => view?.ShowToolActivity(active);
 
         private void OnFailure(ConversationFailure failure) => view?.ShowFailure(failure);
         private void OnSceneUnloaded(Scene scene) => RequestStop(ConversationStopReason.UserRequested);
