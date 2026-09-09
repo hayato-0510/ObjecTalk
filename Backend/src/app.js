@@ -82,7 +82,15 @@ function validateBody(body) {
   const sdp = rawBounded(body.sdp, 'sdp', 1, MAX_SDP_LENGTH);
   const mode = body.mode ?? undefined;
   if (mode !== undefined && mode !== 'exhibition') throw new RangeError('mode');
-  return { objectId, objectName, personalityPrompt, language, sdp, mode };
+  const category = optionalCategory(body.category);
+  return { objectId, objectName, personalityPrompt, language, sdp, mode, category };
+}
+
+function optionalCategory(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new TypeError('category');
+  if (value.trim().length > 50) throw new RangeError('category');
+  return value;
 }
 
 function bounded(value, field, min, max) {

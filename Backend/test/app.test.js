@@ -96,6 +96,33 @@ test('exhibition mode reaches the instructions builder', async () => {
   });
 });
 
+test('an object category reaches the instructions builder', async () => {
+  let upstreamInput;
+  await withServer(dependencies({ createRealtimeCall: async (input) => { upstreamInput = input; return 'v=0\r\nanswer'; } }), async (base) => {
+    const response = await fetch(`${base}/api/realtime/calls`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer valid-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validBody, category: '電子機器' }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(upstreamInput.instructions, /あなたは電子機器です。/);
+  });
+});
+
+test('rejects an oversized or non-string category without calling upstream', async () => {
+  let calls = 0;
+  await withServer(dependencies({ createRealtimeCall: async () => { calls++; return 'answer'; } }), async (base) => {
+    for (const category of ['あ'.repeat(51), 123, {}]) {
+      const response = await fetch(`${base}/api/realtime/calls`, {
+        method: 'POST', headers: { authorization: 'Bearer token', 'content-type': 'application/json' },
+        body: JSON.stringify({ ...validBody, category }),
+      });
+      assert.equal(response.status, 400, JSON.stringify(category));
+    }
+    assert.equal(calls, 0);
+  });
+});
+
 test('rejects an unknown mode without calling upstream', async () => {
   let calls = 0;
   await withServer(dependencies({ createRealtimeCall: async () => { calls++; return 'answer'; } }), async (base) => {
