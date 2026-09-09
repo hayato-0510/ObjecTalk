@@ -198,9 +198,9 @@ namespace ObjecTalk.Infrastructure.Vision
                 return;
             }
 
-            material.mainTexture = source;
-            material.mainTextureScale = new Vector2(crop.ScaleX, crop.ScaleY);
-            material.mainTextureOffset = new Vector2(crop.OffsetX, crop.OffsetY);
+            // Graphics.Blit(source, dest, material) resets the material's _MainTex_ST to identity, so
+            // the centre crop is handed to the shader through a dedicated vector instead.
+            material.SetVector("_CropST", new Vector4(crop.ScaleX, crop.ScaleY, crop.OffsetX, crop.OffsetY));
             Graphics.Blit(source, destination, material);
         }
 
