@@ -132,6 +132,13 @@ namespace ObjecTalk.Presentation.Talk
             database = null;
         }
 
+        /// <summary>
+        /// True while a conversation session is live (any state other than Idle). The exhibition
+        /// idle-reset controller reads this so an ongoing conversation is never timed out.
+        /// </summary>
+        public bool IsConversationActive =>
+            voiceService != null && voiceService.CurrentState != ConversationState.Idle;
+
         public void InitializeForTests(
             IRecognitionObservationSource source,
             ObjectConversationCoordinator conversationCoordinator,

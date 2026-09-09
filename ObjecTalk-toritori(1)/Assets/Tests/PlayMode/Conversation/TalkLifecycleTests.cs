@@ -181,6 +181,25 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
         }
 
         [UnityTest]
+        public IEnumerator TalkController_IsConversationActive_TracksVoiceServiceState()
+        {
+            var fixture = CreateTalkFixture();
+            var controller = fixture.Root.GetComponent<TalkController>();
+            fixture.Root.SetActive(true);
+
+            Assert.That(controller.IsConversationActive, Is.False);
+
+            fixture.Source.Emit(Seen("object-1", "Cup"));
+            yield return WaitUntil(() => fixture.Voice.StartedObjectIds.Count == 1);
+            Assert.That(controller.IsConversationActive, Is.True);
+
+            fixture.Voice.PublishState(ConversationState.Idle);
+            Assert.That(controller.IsConversationActive, Is.False);
+
+            UnityEngine.Object.Destroy(fixture.Root);
+        }
+
+        [UnityTest]
         public IEnumerator TalkController_ApplicationPauseStopsWithApplicationPaused()
         {
             var fixture = CreateTalkFixture();
