@@ -12,9 +12,17 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
     {
         event Action<RealtimeEvent> EventReceived;
 
+        // Raised when the model asks for a tool call (a function_call item in response.done). The
+        // service runs it and answers with SendFunctionCallOutputAsync.
+        event Action<FunctionCallRequest> FunctionCallReceived;
+
         Task ConnectAsync(ConversationContext context, CancellationToken cancellationToken);
 
         Task CancelResponseAsync(CancellationToken cancellationToken);
+
+        // Sends conversation.item.create(function_call_output) then response.create so the model
+        // continues with the tool result. Throws if the transport is not connected.
+        Task SendFunctionCallOutputAsync(string callId, string output, CancellationToken cancellationToken);
 
         void StopRemotePlayback();
 

@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using ObjecTalk.Domain.Conversation;
 using UnityEngine;
 using Unity.WebRTC;
@@ -73,6 +75,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
     {
         public const string EventsChannelLabel = "oai-events";
         public const string ResponseCancelEventJson = "{\"type\":\"response.cancel\"}";
+        public const string ResponseCreateEventJson = "{\"type\":\"response.create\"}";
 
         private readonly IRealtimePeerConnectionAdapter _adapter;
         private readonly IRealtimeSdpExchange _sdpExchange;
@@ -96,6 +99,8 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
         }
 
         public event Action<RealtimeEvent> EventReceived;
+
+        public event Action<FunctionCallRequest> FunctionCallReceived;
 
         public bool IsConnected
         {
@@ -173,6 +178,35 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 resources.DataChannel?.Send(ResponseCancelEventJson);
             }
 
+            return Task.CompletedTask;
+        }
+
+        public Task SendFunctionCallOutputAsync(string callId, string output, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ConnectionResources resources;
+            lock (_sync)
+            {
+                resources = _current;
+            }
+
+            if (resources == null || !resources.Connected || resources.Disposed || resources.DataChannel == null)
+            {
+                throw new InvalidOperationException("The realtime transport is not connected.");
+            }
+
+            var itemCreate = new JObject
+            {
+                ["type"] = "conversation.item.create",
+                ["item"] = new JObject
+                {
+                    ["type"] = "function_call_output",
+                    ["call_id"] = callId ?? string.Empty,
+                    ["output"] = output ?? string.Empty,
+                },
+            };
+            resources.DataChannel.Send(itemCreate.ToString(Formatting.None));
+            resources.DataChannel.Send(ResponseCreateEventJson);
             return Task.CompletedTask;
         }
 
@@ -260,6 +294,11 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
             if (_eventParser.TryParse(message, out RealtimeEvent realtimeEvent))
             {
                 EventReceived?.Invoke(realtimeEvent);
+            }
+
+            if (_eventParser.TryParseFunctionCall(message, out FunctionCallRequest functionCall))
+            {
+                FunctionCallReceived?.Invoke(functionCall);
             }
         }
 

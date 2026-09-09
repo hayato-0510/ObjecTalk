@@ -47,6 +47,49 @@ namespace ObjecTalk.Tests.PlayMode.Conversation
         }
 
         [UnityTest]
+        public IEnumerator DataChannelFunctionCall_RaisesFunctionCallReceived()
+        {
+            var adapter = new FakePeerConnectionAdapter();
+            var transport = new RealtimeWebRtcTransport(adapter, new FakeSdpExchange(), null, null);
+            FunctionCallRequest received = null;
+            transport.FunctionCallReceived += request => received = request;
+            yield return transport.ConnectAsync(Context, CancellationToken.None).AsCoroutine();
+
+            adapter.Channel.RaiseMessage(
+                "{\"type\":\"response.done\",\"response\":{\"output\":["
+                + "{\"type\":\"function_call\",\"name\":\"get_weather\",\"call_id\":\"call_1\",\"arguments\":\"{}\"}]}}");
+
+            Assert.That(received, Is.Not.Null);
+            Assert.That(received.Name, Is.EqualTo("get_weather"));
+            Assert.That(received.CallId, Is.EqualTo("call_1"));
+        }
+
+        [UnityTest]
+        public IEnumerator SendFunctionCallOutputAsync_SendsItemCreateThenResponseCreate()
+        {
+            var adapter = new FakePeerConnectionAdapter();
+            var transport = new RealtimeWebRtcTransport(adapter, new FakeSdpExchange(), null, null);
+            yield return transport.ConnectAsync(Context, CancellationToken.None).AsCoroutine();
+
+            yield return transport.SendFunctionCallOutputAsync("call_1", "鈴鹿は晴れ。", CancellationToken.None).AsCoroutine();
+
+            Assert.That(adapter.Channel.SentMessages.Count, Is.EqualTo(2));
+            Assert.That(adapter.Channel.SentMessages[0], Does.Contain("function_call_output").And.Contain("call_1").And.Contain("鈴鹿は晴れ。"));
+            Assert.That(adapter.Channel.SentMessages[1], Is.EqualTo("{\"type\":\"response.create\"}"));
+        }
+
+        [Test]
+        public void SendFunctionCallOutputAsync_NotConnected_Throws()
+        {
+            var adapter = new FakePeerConnectionAdapter();
+            var transport = new RealtimeWebRtcTransport(adapter, new FakeSdpExchange(), null, null);
+
+            Assert.That(
+                () => transport.SendFunctionCallOutputAsync("call_1", "x", CancellationToken.None),
+                Throws.TypeOf<InvalidOperationException>());
+        }
+
+        [UnityTest]
         public IEnumerator DisconnectAsync_DisposesTracksPeerAndDataChannel()
         {
             var adapter = new FakePeerConnectionAdapter { RaiseRemoteTrackOnSetRemote = true };

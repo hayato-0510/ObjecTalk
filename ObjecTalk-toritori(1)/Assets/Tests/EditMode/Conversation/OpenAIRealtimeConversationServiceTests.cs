@@ -779,6 +779,31 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         {
             private event Action<RealtimeEvent> _eventReceived;
 
+            public event Action<FunctionCallRequest> FunctionCallReceived;
+            public List<(string CallId, string Output)> FunctionOutputs { get; } = new List<(string, string)>();
+            public Exception SendFunctionOutputException { get; set; }
+            public bool Connected { get; set; } = true;
+
+            public void EmitFunctionCall(FunctionCallRequest request) => FunctionCallReceived?.Invoke(request);
+
+            public Task SendFunctionCallOutputAsync(string callId, string output, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                OperationLog.Add("function-output:" + callId);
+                if (SendFunctionOutputException != null)
+                {
+                    throw SendFunctionOutputException;
+                }
+
+                if (!Connected)
+                {
+                    throw new InvalidOperationException("not connected");
+                }
+
+                FunctionOutputs.Add((callId, output));
+                return Task.CompletedTask;
+            }
+
             public Queue<Exception> Failures { get; } = new Queue<Exception>();
             public List<Action<RealtimeEvent>> CapturedHandlers { get; } = new List<Action<RealtimeEvent>>();
             public List<string> OperationLog { get; } = new List<string>();
