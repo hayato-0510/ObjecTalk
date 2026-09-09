@@ -27,6 +27,10 @@ namespace ObjecTalk.Tests.PlayMode
         private const string RegisterCamera = "MatcherRootPanel/RegisterCameraPanel";
         private const string TalkCamera = "MatcherRootPanel/TalkCameraPanel";
 
+        // RegisterCameraPanel's back and shutter buttons live in its header/footer bars.
+        private const string RegisterBack = RegisterCamera + "/TopBar/BackButton";
+        private const string RegisterStart = RegisterCamera + "/BottomBar/Button(regstart)";
+
         private Transform _canvas;
 
         [UnitySetUp]
@@ -134,7 +138,7 @@ namespace ObjecTalk.Tests.PlayMode
             Click(Selection + "/Button(reg)");
             yield return WaitForActive(RegisterCamera);
 
-            Click(RegisterCamera + "/BackButton");
+            Click(RegisterBack);
             yield return null;
 
             Assert.That(Panel(Selection).activeInHierarchy, Is.True,
@@ -157,17 +161,34 @@ namespace ObjecTalk.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator FinishButtonReturnsToHome()
+        public IEnumerator FinishButtonReloadsTheSceneForTheNextVisitor()
         {
             LogAssert.ignoreFailingMessages = true; // see SelectionBackButtonReturnsToHome
             RequireWebcam();
             Click(Selection + "/Button(talk)");
             yield return WaitForActive(TalkCamera);
 
+            // The exhibition "fin" button reloads ObjectDetectionScene rather than returning Home, so
+            // the next visitor starts from a clean scan-ready state. Observe the reload by the camera
+            // root going back to hidden and the selection panel becoming active again.
             Click(TalkCamera + "/Button(fin)");
-            yield return WaitForScene(HomeSceneName);
+            yield return WaitUntil(
+                () =>
+                {
+                    var canvas = GameObject.Find("Canvas");
+                    if (canvas == null)
+                    {
+                        return false;
+                    }
 
-            Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo(HomeSceneName));
+                    var selection = canvas.transform.Find(Selection);
+                    var cameraRoot = canvas.transform.Find(CameraRoot);
+                    return selection != null && selection.gameObject.activeInHierarchy
+                        && cameraRoot != null && !cameraRoot.gameObject.activeSelf;
+                },
+                "the scene did not reload back to the selection panel");
+
+            Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo(SceneName));
         }
 
         // --- wiring hygiene ------------------------------------------------------------------
@@ -178,7 +199,7 @@ namespace ObjecTalk.Tests.PlayMode
             string[] paths =
             {
                 Selection + "/BackButton",
-                RegisterCamera + "/BackButton",
+                RegisterBack,
                 "MatcherRootPanel/PlacementPanel/BackButton",
                 "MatcherRootPanel/NamingPanel/BackButton",
                 TalkCamera + "/BackButton",
@@ -197,7 +218,7 @@ namespace ObjecTalk.Tests.PlayMode
         {
             string[] paths =
             {
-                RegisterCamera + "/Button(regstart)",
+                RegisterStart,
                 "MatcherRootPanel/PlacementPanel/Button(next)",
                 "MatcherRootPanel/NamingPanel/Button(complete)",
                 TalkCamera + "/Button(fin)",
