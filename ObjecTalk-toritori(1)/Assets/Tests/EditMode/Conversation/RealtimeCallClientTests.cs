@@ -19,7 +19,8 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             "りんご\\案内",
             "丁寧に \"話す\"",
             "user-1",
-            "ja");
+            "ja",
+            "電子機器");
 
         [Test]
         public async Task ExchangeSdpAsync_ValidBackendResponse_SendsExpectedRequestAndReturnsAnswer()
@@ -43,6 +44,7 @@ namespace ObjecTalk.Tests.EditMode.Conversation
             Assert.That((string)body["objectName"], Is.EqualTo("りんご\\案内"));
             Assert.That((string)body["personalityPrompt"], Is.EqualTo("丁寧に \"話す\""));
             Assert.That((string)body["language"], Is.EqualTo("ja"));
+            Assert.That((string)body["category"], Is.EqualTo("電子機器"));
             Assert.That((string)body["sdp"], Is.EqualTo(LocalSdp));
             Assert.That(body.ContainsKey("mode"), Is.False, "mode is omitted unless exhibition mode is on");
         }
@@ -57,6 +59,19 @@ namespace ObjecTalk.Tests.EditMode.Conversation
 
             JObject body = JObject.Parse(httpClient.Request.Body);
             Assert.That((string)body["mode"], Is.EqualTo("exhibition"));
+        }
+
+        [Test]
+        public async Task ExchangeSdpAsync_EmptyCategory_SendsAnEmptyString()
+        {
+            var httpClient = new FakeHttpClient(new RealtimeHttpResponse(200, "application/sdp", "answer"));
+            var client = new RealtimeCallClient("https://backend.example", new FakeTokenProvider("firebase-token"), httpClient);
+            var context = new ConversationContext("object-1", "本", "", "user-1", "ja");
+
+            await client.ExchangeSdpAsync(LocalSdp, context, CancellationToken.None);
+
+            JObject body = JObject.Parse(httpClient.Request.Body);
+            Assert.That((string)body["category"], Is.EqualTo(string.Empty));
         }
 
         [Test]

@@ -235,6 +235,7 @@ namespace ObjecTalk.Infrastructure.Conversation.OpenAI
                 ["objectName"] = context.ObjectName,
                 ["personalityPrompt"] = context.PersonalityPrompt,
                 ["language"] = context.Language,
+                ["category"] = context.Category ?? string.Empty,
                 ["sdp"] = localSdp
             };
             if (_exhibitionMode)
