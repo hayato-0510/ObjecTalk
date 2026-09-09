@@ -5,8 +5,9 @@ namespace ObjecTalk.Domain.Conversation
 {
     /// <summary>
     /// Read-aloud question prompts shown on the Talk screen for a recognised object, keyed by its
-    /// trimmed free-text category. A middle-schooler reads one out loud and answers it with
-    /// push-to-talk; the prompts are display-only. An unknown or blank category returns nothing.
+    /// trimmed free-text category (a few common spellings fold to the canonical label). A
+    /// middle-schooler reads one out loud and answers it with push-to-talk; the prompts are
+    /// display-only. An unknown or blank category returns nothing.
     /// </summary>
     public static class CategorySuggestions
     {
@@ -37,10 +38,36 @@ namespace ObjecTalk.Domain.Conversation
                     "似た本ある？",
                     "どんな人におすすめ？",
                 },
+                ["ノート"] = new[]
+                {
+                    "ノートの上手なとり方は？",
+                    "方眼と横線、どっちがいい？",
+                },
                 ["文房具"] = new[]
                 {
                     "これのじょうずな使い方は？",
                     "これで何ができる？",
+                },
+                ["ペン"] = new[]
+                {
+                    "じょうずに書くコツは？",
+                    "インクがなくなったらどうするの？",
+                    "何色くらい種類があるの？",
+                },
+                ["鉛筆"] = new[]
+                {
+                    "どのこさを使えばいいの？",
+                    "鉛筆とシャーペン、どっちがいい？",
+                },
+                ["消しゴム"] = new[]
+                {
+                    "きれいに消すコツは？",
+                    "ねりけしって何？",
+                },
+                ["定規"] = new[]
+                {
+                    "まっすぐ線を引くコツは？",
+                    "長さをはかるって何に使うの？",
                 },
                 ["アクセサリ"] = new[]
                 {
@@ -66,6 +93,17 @@ namespace ObjecTalk.Domain.Conversation
                 ["ぶんぼうぐ"] = "文房具",
                 ["アクセサリー"] = "アクセサリ",
                 ["でんしきき"] = "電子機器",
+                ["ボールペン"] = "ペン",
+                ["ぼーるぺん"] = "ペン",
+                ["ぺん"] = "ペン",
+                ["えんぴつ"] = "鉛筆",
+                ["シャープペン"] = "鉛筆",
+                ["シャーペン"] = "鉛筆",
+                ["けしごむ"] = "消しゴム",
+                ["消しごむ"] = "消しゴム",
+                ["じょうぎ"] = "定規",
+                ["ものさし"] = "定規",
+                ["のーと"] = "ノート",
             };
 
         public static IReadOnlyList<string> ForCategory(string category)

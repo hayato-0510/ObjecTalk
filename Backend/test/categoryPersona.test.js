@@ -8,7 +8,12 @@ const CASES = [
   ['飲みもの', /飲みものです/],
   ['傘', /傘です/],
   ['本', /本です/],
+  ['ノート', /ノートです/],
   ['文房具', /文房具です/],
+  ['ペン', /ペンです/],
+  ['鉛筆', /鉛筆です/],
+  ['消しゴム', /消しゴムです/],
+  ['定規', /定規です/],
   ['アクセサリ', /アクセサリ/],
 ];
 
@@ -30,6 +35,11 @@ test('common hiragana spellings fold to the canonical label', () => {
   assert.equal(categoryPersona('飲み物'), categoryPersona('飲みもの'));
   assert.equal(categoryPersona('ぶんぼうぐ'), categoryPersona('文房具'));
   assert.equal(categoryPersona('アクセサリー'), categoryPersona('アクセサリ'));
+  assert.equal(categoryPersona('ボールペン'), categoryPersona('ペン'));
+  assert.equal(categoryPersona('えんぴつ'), categoryPersona('鉛筆'));
+  assert.equal(categoryPersona('けしごむ'), categoryPersona('消しゴム'));
+  assert.equal(categoryPersona('じょうぎ'), categoryPersona('定規'));
+  assert.equal(categoryPersona('のーと'), categoryPersona('ノート'));
   assert.notEqual(categoryPersona('かさ'), '');
 });
 

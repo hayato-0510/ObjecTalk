@@ -11,7 +11,12 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         [TestCase("飲みもの")]
         [TestCase("傘")]
         [TestCase("本")]
+        [TestCase("ノート")]
         [TestCase("文房具")]
+        [TestCase("ペン")]
+        [TestCase("鉛筆")]
+        [TestCase("消しゴム")]
+        [TestCase("定規")]
         [TestCase("アクセサリ")]
         [TestCase("その他")]
         public void ForCategory_KnownLabel_ReturnsTwoToFourDistinctPrompts(string label)
@@ -37,6 +42,12 @@ namespace ObjecTalk.Tests.EditMode.Conversation
         [TestCase("飲み物", "飲みもの")]
         [TestCase("ぶんぼうぐ", "文房具")]
         [TestCase("アクセサリー", "アクセサリ")]
+        [TestCase("ボールペン", "ペン")]
+        [TestCase("えんぴつ", "鉛筆")]
+        [TestCase("シャーペン", "鉛筆")]
+        [TestCase("けしごむ", "消しゴム")]
+        [TestCase("じょうぎ", "定規")]
+        [TestCase("のーと", "ノート")]
         public void ForCategory_FoldsCommonSpellingsToTheCanonicalLabel(string alias, string canonical)
         {
             Assert.That(
