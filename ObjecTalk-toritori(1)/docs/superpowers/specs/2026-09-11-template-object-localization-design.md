@@ -147,12 +147,29 @@ readonly struct LocalVerificationThresholds
 ```
 
 built from `RecognitionSettings` and passed as `Verify(image, reference, in thresholds)`. AKAZE
-reads `MinimumMatches`; templates read `MinimumScore`. `RecognitionSettings` gains
-`MinimumTemplateScore`, default **0.35** — the combined move+zoom+tilt cases scored 0.38 and the
-weakest true match in the spike sat at 0.31.
+reads `MinimumMatches`; templates read `MinimumScore`.
 
 The existing intent that thresholds come from settings rather than call sites is preserved, and
 `MinimumLocalMatchCountComesFromSettings` still holds.
+
+**Two different jobs, two switches.** A correlation score answers two questions that must not be
+conflated:
+
+1. *Do I trust this position?* Below `MinimumTemplateScore` the match is too weak to place the
+   face, so `Verify` reports verified with no location and the overlay falls back to the registered
+   spot. This is always on — reporting a position you do not believe is worse than reporting none.
+2. *Is the object really there?* Rejecting a candidate the embedding accepted changes recognition
+   itself. This is governed by a separate `TemplateGatesRecognition` flag on
+   `RecognitionSettings`, **default false**.
+
+With the gate off, the template backend confirms every candidate the embedding produced — exactly
+what `NullLocalFeatureVerifier` does on the device today — so shipping it cannot make recognition
+worse than it currently is. The gate is turned on only after the device pass has measured what
+scores real frames produce for true and false candidates.
+
+`MinimumTemplateScore` defaults to **0.35**: the combined move+zoom+tilt cases scored 0.38 and the
+weakest true match in the spike sat at 0.31. That number comes from synthetic frames and is a
+starting point for the device pass, not a settled value.
 
 ### 5. Selection and rollback
 
@@ -181,8 +198,10 @@ threshold, a template larger than the query. `TemplatePreparationTests`: crop ge
 conversion, origin convention.
 
 **Core.** A record whose local features fail to restore keeps its embedding and stays recognizable
-(section 3's regression). A score under threshold rejects the candidate. A seeded template yields a
-position.
+(section 3's regression). A seeded template yields a position. A score under
+`MinimumTemplateScore` reports no location but still confirms the candidate while
+`TemplateGatesRecognition` is false, and rejects it once the flag is true — both directions
+tested, since the whole point of the flag is that the two behaviours differ.
 
 **Not unit-tested.** `TemplateVerifier`'s `Texture2D`-to-bytes glue, for the same structural reason
 `AkazeVerifier` is untested — OpenCV+Unity ships without an assembly definition, so both live in
@@ -212,6 +231,8 @@ snapshot. If viewpoint change proves to be the limit, Phase 2 stores a template 
 capture; the interface takes a list of templates from the start so that is an addition, not a
 rewrite.
 
-**Verification is now on the critical path.** Section 4 lets the template score reject a candidate
-the embedding accepted. A badly chosen threshold makes recognition worse, not better. The default
-is evidenced but the device tuning pass is mandatory, and `None` disables the gate.
+**Verification can reach the critical path, but not yet.** Section 4 keeps
+`TemplateGatesRecognition` off by default, so the first version cannot make recognition worse than
+today's embedding-only device behaviour. Turning it on is a second, separately verified step
+driven by measured scores from real frames — a threshold guessed from synthetic data would be a
+good way to break a working exhibition.
