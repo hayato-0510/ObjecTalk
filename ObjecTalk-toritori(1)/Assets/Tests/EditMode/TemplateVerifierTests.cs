@@ -242,6 +242,58 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
+        public void ExtractAcceptsAJpegDecodedFrame()
+        {
+            // The device path: a registration snapshot is a JPEG, and LoadImage overrides the
+            // texture format to RGB24 because a JPEG carries no alpha. Every seed failed on this.
+            var source = Frame(0.5f, 0.5f, 0.375f);
+            var jpeg = source.EncodeToJPG(95);
+            Object.DestroyImmediate(source);
+
+            var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, false, false);
+            try
+            {
+                Assert.That(decoded.LoadImage(jpeg), Is.True);
+                Assert.That(decoded.format, Is.EqualTo(TextureFormat.RGB24),
+                    "if this ever changes, the three-channel path below stops being exercised");
+
+                using var sample = _verifier.Extract(decoded);
+
+                Assert.That(sample, Is.Not.Null);
+                Assert.That(sample.HasFeatures, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(decoded);
+            }
+        }
+
+        [Test]
+        public void ATemplateSeededFromAJpegStillLocatesTheObject()
+        {
+            var registration = Frame(0.5f, 0.5f, 0.375f);
+            var jpeg = registration.EncodeToJPG(95);
+            Object.DestroyImmediate(registration);
+            var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, false, false);
+            var live = Frame(0.35f, 0.5f, 0.375f);
+            try
+            {
+                decoded.LoadImage(jpeg);
+                using var reference = _verifier.Extract(decoded);
+
+                var result = _verifier.Verify(live, reference, Lenient);
+
+                Assert.That(result.HasLocation, Is.True);
+                Assert.That(result.RelativeX, Is.LessThan(0.45f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(decoded);
+                Object.DestroyImmediate(live);
+            }
+        }
+
+        [Test]
         public void RestoreRefusesABlobWrittenByAnotherBackend()
         {
             // AKAZE descriptors are not a template. Reading them as one would produce a confident

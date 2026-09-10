@@ -99,6 +99,42 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
+        public void ToGrayscaleSquare_ReadsThreeChannelPixelsToo()
+        {
+            // A JPEG decoded by Texture2D.LoadImage comes back RGB24, not RGBA32 - it has no
+            // alpha to store. Registration snapshots are JPEGs, so three channels is not an
+            // exotic case, it is the normal one for a seeded template.
+            var rgb = new byte[8 * 8 * 3];
+            for (var i = 0; i < 8 * 8; i++)
+            {
+                rgb[(i * 3) + 1] = 255;     // pure green
+            }
+
+            var gray = TemplatePreparation.ToGrayscaleSquare(rgb, 8, 8, 1f, 4, bytesPerPixel: 3);
+
+            Assert.That(gray.Length, Is.EqualTo(16));
+            Assert.That(gray[0], Is.EqualTo(149));   // 0.587 * 255
+        }
+
+        [Test]
+        public void ToGrayscaleSquare_ReadsTheSameSceneIdenticallyAtThreeOrFourChannels()
+        {
+            var rgba = Rgba(16, 16, (x, y) => ((byte)(x * 15), (byte)(y * 15), (byte)40));
+            var rgb = new byte[16 * 16 * 3];
+            for (var i = 0; i < 16 * 16; i++)
+            {
+                rgb[i * 3] = rgba[i * 4];
+                rgb[(i * 3) + 1] = rgba[(i * 4) + 1];
+                rgb[(i * 3) + 2] = rgba[(i * 4) + 2];
+            }
+
+            var fromRgba = TemplatePreparation.ToGrayscaleSquare(rgba, 16, 16, 0.75f, 8);
+            var fromRgb = TemplatePreparation.ToGrayscaleSquare(rgb, 16, 16, 0.75f, 8, bytesPerPixel: 3);
+
+            Assert.That(fromRgb, Is.EqualTo(fromRgba));
+        }
+
+        [Test]
         public void ToGrayscaleSquare_RejectsAPixelBufferThatIsNotRgba()
         {
             Assert.Throws<ArgumentException>(() =>

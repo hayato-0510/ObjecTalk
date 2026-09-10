@@ -133,16 +133,32 @@ namespace ObjecTalk.Infrastructure.Vision
                 throw new ArgumentNullException(nameof(image));
             }
 
+            // A live camera frame is RGBA32; a registration snapshot decoded from JPEG is RGB24,
+            // because a JPEG has no alpha to store. Both are ordinary inputs here.
+            int bytesPerPixel;
+            switch (image.format)
+            {
+                case TextureFormat.RGBA32:
+                    bytesPerPixel = 4;
+                    break;
+                case TextureFormat.RGB24:
+                    bytesPerPixel = 3;
+                    break;
+                default:
+                    throw new ArgumentException(
+                        $"Template frames must be RGBA32 or RGB24; got {image.format}.", nameof(image));
+            }
+
             var width = image.width;
             var height = image.height;
-            var stride = width * 4;
+            var stride = width * bytesPerPixel;
             var required = stride * height;
 
             NativeArray<byte> raw = image.GetRawTextureData<byte>();
             if (raw.Length != required)
             {
                 throw new ArgumentException(
-                    $"Template frames must be {nameof(TextureFormat.RGBA32)}; got {image.format}.",
+                    $"A {image.format} frame of {width}x{height} should be {required} bytes, not {raw.Length}.",
                     nameof(image));
             }
 
@@ -161,7 +177,8 @@ namespace ObjecTalk.Infrastructure.Vision
                 width,
                 height,
                 ImageGeometry.DefaultCropFraction,
-                TemplateMatch.DefaultSearchSize);
+                TemplateMatch.DefaultSearchSize,
+                bytesPerPixel);
         }
 
         private void ThrowIfDisposed()

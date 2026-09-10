@@ -15,12 +15,20 @@ namespace ObjecTalk.Domain.Recognition
         private const double BlueWeight = 0.114d;
 
         /// <summary>
-        /// Centre-crops <paramref name="rgba"/> to a square, converts to luma, and resamples to
+        /// Centre-crops <paramref name="pixels"/> to a square, converts to luma, and resamples to
         /// <paramref name="outputSize"/>. Row order is preserved: row zero is the top of the
         /// source, and only <see cref="TemplateMatch"/> flips the axis when reporting a position.
+        ///
+        /// <paramref name="bytesPerPixel"/> is four for RGBA32 and three for RGB24. Both turn up:
+        /// a camera frame carries alpha, a JPEG decoded from a registration snapshot does not.
         /// </summary>
         public static byte[] ToGrayscaleSquare(
-            ReadOnlySpan<byte> rgba, int width, int height, float cropFraction, int outputSize)
+            ReadOnlySpan<byte> pixels,
+            int width,
+            int height,
+            float cropFraction,
+            int outputSize,
+            int bytesPerPixel = 4)
         {
             if (width <= 0 || height <= 0)
             {
@@ -32,10 +40,16 @@ namespace ObjecTalk.Domain.Recognition
                 throw new ArgumentOutOfRangeException(nameof(outputSize), "The template has no size.");
             }
 
-            if (rgba.Length != width * height * 4)
+            if (bytesPerPixel != 3 && bytesPerPixel != 4)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bytesPerPixel), "Only three- and four-channel pixels are supported.");
+            }
+
+            if (pixels.Length != width * height * bytesPerPixel)
             {
                 throw new ArgumentException(
-                    "Pixels must be four channels per pixel at the declared size.", nameof(rgba));
+                    "The pixel count does not match the declared size and channel count.", nameof(pixels));
             }
 
             var crop = ImageGeometry.CenterCrop(width, height, cropFraction);
@@ -47,8 +61,10 @@ namespace ObjecTalk.Domain.Recognition
                 for (var x = 0; x < outputSize; x++)
                 {
                     var sx = crop.X + (x * crop.Width / outputSize);
-                    var i = ((sy * width) + sx) * 4;
-                    var luma = (RedWeight * rgba[i]) + (GreenWeight * rgba[i + 1]) + (BlueWeight * rgba[i + 2]);
+                    var i = ((sy * width) + sx) * bytesPerPixel;
+                    var luma = (RedWeight * pixels[i])
+                        + (GreenWeight * pixels[i + 1])
+                        + (BlueWeight * pixels[i + 2]);
                     output[(y * outputSize) + x] = (byte)(luma > 255d ? 255d : luma);
                 }
             }
