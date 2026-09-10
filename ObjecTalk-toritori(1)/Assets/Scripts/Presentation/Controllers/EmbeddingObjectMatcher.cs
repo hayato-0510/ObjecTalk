@@ -1513,11 +1513,21 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         else Debug.LogError("SnapshotDisplay_Naming is not assigned!");
         FitGraphicAspect(snapshotDisplay_Naming, crop.Width / (float)crop.Height);
 
-        ShowPlacedFaceOnNamingPreview(crop);
-
         if (namingPanel != null) namingPanel.SetActive(true);
         if (placementPanel != null) placementPanel.SetActive(false);
         cropOverlayPlacement?.Hide();
+
+        // Only now is the preview's rect real. FitGraphicAspect above just set an
+        // AspectRatioFitter, which resizes on the next layout pass, and the panel was inactive
+        // until a moment ago - reading the rect before both is the stale-rect trap this file
+        // already warns about for the camera guides.
+        Canvas.ForceUpdateCanvases();
+        if (snapshotDisplay_Naming != null)
+        {
+            LayoutRebuilder.ForceRebuildLayoutImmediate(snapshotDisplay_Naming.rectTransform);
+        }
+
+        ShowPlacedFaceOnNamingPreview(crop);
 
         if (nameInputField != null) nameInputField.text = "";
         if (categoryInputField != null) categoryInputField.text = "";

@@ -219,6 +219,59 @@ object, and watch the face follow it and stay put when the object does.
 
 ---
 
+---
+
+## Device result (2026-09-11): the method does not work, and this is why
+
+Measured on the SC-03L against a registered object moved slowly by hand.
+
+**The pipeline is correct.** A template matched against the very picture it was built from scores
+**1.000** and lands at **(0.500, 0.500)** — dead centre, exactly right. Crop geometry, grayscale
+conversion, the three-way vertical-axis convention, rescaling and the correlation itself are all
+sound. No implementation fault survives that number.
+
+**The match does not happen on a re-capture.** Live correlation sat at a median of **0.416**, and
+the reported position jumped a median of **0.175** of the frame between consecutive ticks, ranging
+over most of the view. A hand-held object cannot move that far in 0.2 seconds, so the peak is not
+on the object.
+
+**Raising the threshold cannot rescue it.** Sorting the samples by score, the highest band (0.48+)
+jumped a median of 0.320 — no steadier than the lowest band (0.323). This is not a threshold that
+needs tuning; it is a match that is not happening.
+
+**Removing background did not help.** The template fraction was cut from 0.50 to 0.32, so the
+template carried far less of the surface the object was photographed on:
+
+| | fraction 0.50 | fraction 0.32 |
+|---|---|---|
+| correlation median | 0.416 | 0.410 |
+| correlation max | 0.553 | **0.459** |
+| jump median | 0.175 | 0.097 |
+| jump max | 0.647 | **0.742** |
+| spread x | 0.477 | **0.704** |
+
+The score did not improve and the best peak got *worse* — a tighter template carries less to
+identify the object with. The background-contamination hypothesis is falsified.
+
+**Conclusion.** With a self-match of 1.000 and a live match of 0.41, the registration photograph
+and the live view of the same object are genuinely only that similar under raw grayscale
+correlation. Viewpoint, lighting and background change on a real re-capture defeat the method. The
+spike could not see this because its "live" frames were cut from the same photograph — the
+limitation recorded above, now settled negatively.
+
+**What ships.** `localFeatureBackend` is set to `None` in `ObjectDetectionScene`: on the device the
+face returns to its registered position, which is the behaviour from before this work and is
+steadier than a face chasing a wandering peak. Everything else stays — the Domain maths, the
+verifier, the tests, and the backend switch — so the Editor can still run `Template` or `Akaze`,
+and an arm64 OpenCV or a better localizer would drop into the same seam.
+
+**Worth keeping regardless.** Two real defects were found on the way: `LoadSamples` dropped an
+object's embedding when its local features would not restore, which would have unregistered every
+object on any backend switch; and template rows could not be persisted at all because
+`descriptor_type` is read as an OpenCV Mat type rather than an opaque tag.
+
+---
+
 ## Non-goals
 
 No database schema change. No re-registration of existing objects. No change to the embedding
