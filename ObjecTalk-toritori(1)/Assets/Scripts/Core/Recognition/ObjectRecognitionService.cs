@@ -160,13 +160,16 @@ namespace ObjecTalk.Core.Recognition
                     continue;
                 }
 
+                // A backend that cannot read this row's blob costs the object its position, not
+                // its identity: the embedding still recognises it, and a template can be seeded
+                // later. Dropping the record here would unregister the object outright.
+                _samples.Add(sample);
                 if (features == null || !features.HasFeatures)
                 {
                     features?.Dispose();
                     continue;
                 }
 
-                _samples.Add(sample);
                 AddReference(record.ObjectId, features);
             }
         }
@@ -501,9 +504,16 @@ namespace ObjecTalk.Core.Recognition
 
         private LocalVerificationResult VerifyLocally(string objectId)
         {
-            if (_activeFrame == null || !_references.TryGetValue(objectId, out var references))
+            if (_activeFrame == null)
             {
                 return LocalVerificationResult.Rejected;
+            }
+
+            // No references means no backend could read this object's blob. Recognition then rests
+            // on the embedding alone, which is what the device already does without AKAZE.
+            if (!_references.TryGetValue(objectId, out var references) || references.Count == 0)
+            {
+                return LocalVerificationResult.Verified();
             }
 
             var verificationFrame = _preprocessor.CopyVerificationFrame(_activeFrame);
