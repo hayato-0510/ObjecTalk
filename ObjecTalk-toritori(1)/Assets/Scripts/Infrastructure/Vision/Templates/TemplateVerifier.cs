@@ -28,6 +28,13 @@ namespace ObjecTalk.Infrastructure.Vision
         /// </summary>
         public const int TemplateDescriptorType = 1;   // CV_8S: depth 1, one channel
 
+        /// <summary>
+        /// Temporary instrumentation for the device tuning pass. The correlation score is computed
+        /// here and nowhere else, and choosing a real MinimumTemplateScore means seeing what real
+        /// frames produce. Off in normal use; turn it off again once the threshold is settled.
+        /// </summary>
+        public static bool LogScores;
+
         private byte[] _rgba;
         private bool _disposed;
 
@@ -97,7 +104,13 @@ namespace ObjecTalk.Infrastructure.Vision
                 thresholds.MinimumScore,
                 out var relativeX,
                 out var relativeY,
-                out _);
+                out var score);
+
+            if (LogScores)
+            {
+                Debug.Log($"[TrackDiag] correlation={score:F3} located={located} "
+                    + $"pos=({relativeX:F3},{relativeY:F3}) threshold={thresholds.MinimumScore:F2}");
+            }
 
             return located
                 ? LocalVerificationResult.VerifiedAt(relativeX, relativeY)

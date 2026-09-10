@@ -107,6 +107,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
     [Header("Other UI Components")]
     public Image snapshotDisplay_Naming;
+
+    [Tooltip("命名画面のプレビューに重ねる目。配置画面で決めた位置がそのまま出る。")]
+    public Image namingEyeImage;
+
+    [Tooltip("命名画面のプレビューに重ねる口。")]
+    public Image namingMouthImage;
     public Image snapshotDisplay_Placement;
     public Button registerStartButton; // Button in RegisterCameraPanel
     public Button nextButton;
@@ -191,6 +197,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
     [Tooltip("テンプレートが一致しないとき認識そのものを却下するか。実機でスコアを測るまで OFF。")]
     public bool templateGatesRecognition = false;
+
+    [Tooltip("一時的な計測用。毎tickの追従位置と相関スコアをログに出す。しきい値を決めたら OFF。")]
+    public bool logTrackingDiagnostics = false;
 
     [Header("Style Selection UI")]
     public ScrollRect styleScrollViewRect;
@@ -368,6 +377,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             ImageGeometry.MaximumVerificationImageSize,
             guideFractionOfPreview,
             backgroundMaskFraction);
+        TemplateVerifier.LogScores = logTrackingDiagnostics;
         _verifier = BuildLocalFeatureVerifier();
         _extractor = new SentisEmbeddingExtractor();
 
@@ -932,6 +942,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
                 _faceTrackedTarget = result.HasLocation
                     ? new Vector2(result.RelativeX, result.RelativeY)
                     : FrameCentre;
+                // TEMPORARY (device tuning pass): the only way to choose a real
+                // minimumTemplateScore is to see what real frames actually score.
+                if (logTrackingDiagnostics)
+                {
+                    // Score here is the embedding's cosine similarity, not the correlation -
+                    // TemplateVerifier logs that one itself, where it is actually computed.
+                    Debug.Log($"[TrackDiag] located={result.HasLocation} "
+                        + $"pos=({result.RelativeX:F3},{result.RelativeY:F3}) "
+                        + $"embedding={result.Score:F3} id={result.ObjectId}");
+                }
                 if (_objectsById.TryGetValue(result.ObjectId, out var recognized))
                 {
                     UpdateRecognitionState(true, recognized, result.ObjectId, result.Score);
@@ -1480,6 +1500,8 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         else Debug.LogError("SnapshotDisplay_Naming is not assigned!");
         FitGraphicAspect(snapshotDisplay_Naming, crop.Width / (float)crop.Height);
 
+        ShowPlacedFaceOnNamingPreview(crop);
+
         if (namingPanel != null) namingPanel.SetActive(true);
         if (placementPanel != null) placementPanel.SetActive(false);
         cropOverlayPlacement?.Hide();
@@ -1487,6 +1509,58 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         if (nameInputField != null) nameInputField.text = "";
         if (categoryInputField != null) categoryInputField.text = "";
         Debug.Log("Switched to Naming Mode.");
+    }
+
+    /// <summary>
+    /// Repeats the placed eye and mouth on the naming preview, so the user confirms the face they
+    /// actually made rather than a bare photo. The positions were recorded against the placement
+    /// screen, which showed the whole frame, while this preview shows only the centre square that
+    /// gets registered - hence the remap, without which the face lands well off the mark.
+    /// </summary>
+    private void ShowPlacedFaceOnNamingPreview(PixelRect crop)
+    {
+        if (snapshotDisplay_Naming == null || tempSnapshot == null)
+        {
+            return;
+        }
+
+        var normalized = ImageGeometry.NormalizedCenterCrop(
+            tempSnapshot.width, tempSnapshot.height, guideFractionOfPreview);
+        var previewRect = snapshotDisplay_Naming.rectTransform.rect;
+
+        PlaceNamingPiece(namingEyeImage, eyeStyles, currentEyeId, tempRelativeEyePos, overlayEyeFraction, normalized, previewRect);
+        PlaceNamingPiece(namingMouthImage, mouthStyles, currentMouthId, tempRelativeMouthPos, overlayMouthFraction, normalized, previewRect);
+    }
+
+    private static void PlaceNamingPiece(
+        Image image, List<Sprite> styles, int styleId, Vector2 relative, float fraction,
+        NormalizedRect crop, Rect previewRect)
+    {
+        if (image == null)
+        {
+            return;
+        }
+
+        var placeable = styleId >= 0 && styles != null && styleId < styles.Count && styles[styleId] != null
+                        && relative.x >= 0f && relative.y >= 0f
+                        && previewRect.width > 0f && previewRect.height > 0f;
+        if (!placeable)
+        {
+            image.gameObject.SetActive(false);
+            return;
+        }
+
+        var (x, y) = CropRemap.ToCropSpace(relative.x, relative.y, crop);
+        var (anchoredX, anchoredY) = FaceOverlayLayout.AnchoredPosition(x, y, previewRect.width, previewRect.height);
+
+        image.sprite = styles[styleId];
+        var rt = image.rectTransform;
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(anchoredX, anchoredY);
+        var side = Mathf.Min(previewRect.width, previewRect.height) * fraction;
+        rt.sizeDelta = new Vector2(side, side);
+        image.gameObject.SetActive(true);
     }
 
     private void SwitchToPlacementMode(Texture2D snapshot)
