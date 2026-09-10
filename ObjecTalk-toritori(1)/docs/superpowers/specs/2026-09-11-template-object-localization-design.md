@@ -203,10 +203,16 @@ conversion, origin convention.
 `TemplateGatesRecognition` is false, and rejects it once the flag is true — both directions
 tested, since the whole point of the flag is that the two behaviours differ.
 
-**Not unit-tested.** `TemplateVerifier`'s `Texture2D`-to-bytes glue, for the same structural reason
-`AkazeVerifier` is untested — OpenCV+Unity ships without an assembly definition, so both live in
-`Assembly-CSharp`, which the EditMode test assembly cannot reference. The mitigation is to keep
-that glue thin and the logic in Domain.
+**Infrastructure, and it *is* testable.** `AkazeVerifier` is untestable because OpenCV+Unity ships
+without an assembly definition, which strands anything touching it in `Assembly-CSharp` — a
+constraint the EditMode test assembly cannot reference past. `TemplateVerifier` has no OpenCV
+dependency, so it gets its own `ObjecTalk.Infrastructure.Vision.Templates` assembly (referencing
+`ObjecTalk.Domain.Recognition` and `ObjecTalk.Core.Recognition`, engine references on for
+`Texture2D`), the EditMode assembly references it, and the `Texture2D`-to-bytes glue is covered by
+real tests against a constructed texture. This is a reason to prefer the new backend beyond the
+measurements.
+
+Only `EmbeddingObjectMatcher`'s backend selection stays untested, as the whole class already is.
 
 **Device is the real test.** Build ARM64, install on the SC-03L, point the camera at a registered
 object, and watch the face follow it and stay put when the object does.
