@@ -590,6 +590,50 @@ namespace ObjecTalk.Core.Recognition
             }
         }
 
+        /// <summary>
+        /// Supplies references for an object whose persisted blob this backend could not read -
+        /// the presentation layer builds them from the registration snapshot it already holds.
+        /// A restored reference is authoritative, so an object that already has one is untouched,
+        /// and an object this service has never loaded is ignored rather than invented.
+        /// Takes a list because a later version stores one template per registration capture.
+        /// </summary>
+        public void SeedReferences(string objectId, IReadOnlyList<ILocalFeatureSample> references)
+        {
+            ThrowIfDisposed();
+            if (string.IsNullOrEmpty(objectId) || references == null || references.Count == 0)
+            {
+                return;
+            }
+
+            if (_references.TryGetValue(objectId, out var existing) && existing.Count > 0)
+            {
+                return;
+            }
+
+            var known = false;
+            for (var i = 0; i < _samples.Count; i++)
+            {
+                if (string.Equals(_samples[i].Label, objectId, StringComparison.Ordinal))
+                {
+                    known = true;
+                    break;
+                }
+            }
+
+            if (!known)
+            {
+                return;
+            }
+
+            for (var i = 0; i < references.Count; i++)
+            {
+                if (references[i] != null && references[i].HasFeatures)
+                {
+                    AddReference(objectId, references[i]);
+                }
+            }
+        }
+
         private void AddReference(string objectId, ILocalFeatureSample features)
         {
             if (!_references.TryGetValue(objectId, out var list))

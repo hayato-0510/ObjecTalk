@@ -201,6 +201,49 @@ namespace ObjecTalk.Tests.EditMode
             Assert.That(_verifier.VerifyCallCount, Is.Zero);
         }
 
+        // --- seeding --------------------------------------------------------------------------
+
+        [Test]
+        public void SeededReferencesGiveAnObjectAPositionItCouldNotRestore()
+        {
+            _verifier.RestoreFails = true;
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyLocation = (0.62f, 0.28f);
+
+            _service.SeedReferences(ObjectA, new ILocalFeatureSample[] { new FakeLocalFeatureSample("seeded") });
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.Recognized));
+            Assert.That(result.HasLocation, Is.True);
+            Assert.That(result.RelativeX, Is.EqualTo(0.62f).Within(1e-6f));
+        }
+
+        [Test]
+        public void SeedingLeavesARestoredReferenceAlone()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+
+            _service.SeedReferences(ObjectA, new ILocalFeatureSample[] { new FakeLocalFeatureSample("seeded") });
+            _extractor.ScriptResult(1f, 0f);
+            RunOneCycle(now: 0d);
+
+            Assert.That(_verifier.VerifiedAgainst.Count, Is.EqualTo(1),
+                "the persisted reference is authoritative; seeding must not add a second one");
+        }
+
+        [Test]
+        public void SeedingAnUnknownObjectIsIgnored()
+        {
+            Build(Settings());
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+
+            Assert.DoesNotThrow(() => _service.SeedReferences(
+                "no-such-object", new ILocalFeatureSample[] { new FakeLocalFeatureSample("seeded") }));
+        }
+
         // --- verification gating --------------------------------------------------------------
 
         [Test]
