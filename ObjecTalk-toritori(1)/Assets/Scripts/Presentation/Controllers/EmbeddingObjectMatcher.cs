@@ -201,6 +201,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     [Tooltip("一時的な計測用。毎tickの追従位置と相関スコアをログに出す。しきい値を決めたら OFF。")]
     public bool logTrackingDiagnostics = false;
 
+    [Range(0.15f, 1f)]
+    [Tooltip("プレビューのうちテンプレートにする割合。小さいほど背景が減るが、物体の手がかりも減る。")]
+    public float templateFraction = TemplateMatch.DefaultTemplateFraction;
+
     [Header("Style Selection UI")]
     public ScrollRect styleScrollViewRect;
     public GameObject styleButtonPrefab;
@@ -449,6 +453,15 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
                     continue;
                 }
 
+                if (TemplateVerifier.LogScores)
+                {
+                    // Matching a picture against itself is the anchor the live numbers are read
+                    // against: near 1 here means the pipeline is sound and a low live score is
+                    // the scene having changed, not the maths being wrong.
+                    Debug.Log($"[TrackDiag] self-match for '{item.object_id}':");
+                    _verifier.Verify(snapshot, sample, LocalVerificationThresholds.From(BuildRecognitionSettings()));
+                }
+
                 _recognitionService.SeedReferences(item.object_id, new[] { sample });
                 seeded++;
             }
@@ -493,7 +506,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
             default:
                 // No native library, so nothing here can throw the way AKAZE does.
-                var templates = new TemplateVerifier();
+                var templates = new TemplateVerifier(Mathf.Clamp(templateFraction, 0.15f, 1f));
                 templates.Initialize();
                 return templates;
         }

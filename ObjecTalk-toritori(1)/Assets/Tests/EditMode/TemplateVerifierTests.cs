@@ -294,6 +294,53 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
+        public void ATighterTemplateStillLocatesTheObject()
+        {
+            // The device pass showed a half-background template failing to lock on; a tighter one
+            // carries less of the desk the object was photographed on. It still has to work.
+            using var tight = new TemplateVerifier(templateFraction: 0.32f);
+            tight.Initialize();
+            var registration = Frame(0.5f, 0.5f, 0.375f);
+            var live = Frame(0.35f, 0.5f, 0.375f);
+            try
+            {
+                using var reference = tight.Extract(registration);
+
+                var result = tight.Verify(live, reference, Lenient);
+
+                Assert.That(result.HasLocation, Is.True);
+                Assert.That(result.RelativeX, Is.LessThan(0.45f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(registration);
+                Object.DestroyImmediate(live);
+            }
+        }
+
+        [Test]
+        public void AFrameMatchedAgainstItselfScoresNearlyPerfectly()
+        {
+            // The anchor the device numbers are read against: if the same picture does not score
+            // near 1, the pipeline is wrong; if it does, a low live score is the scene differing.
+            var frame = Frame(0.5f, 0.5f, 0.375f);
+            try
+            {
+                using var reference = _verifier.Extract(frame);
+
+                var result = _verifier.Verify(frame, reference, Lenient);
+
+                Assert.That(result.HasLocation, Is.True);
+                Assert.That(result.RelativeX, Is.EqualTo(0.5f).Within(0.05f));
+                Assert.That(result.RelativeY, Is.EqualTo(0.5f).Within(0.05f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(frame);
+            }
+        }
+
+        [Test]
         public void RestoreRefusesABlobWrittenByAnotherBackend()
         {
             // AKAZE descriptors are not a template. Reading them as one would produce a confident

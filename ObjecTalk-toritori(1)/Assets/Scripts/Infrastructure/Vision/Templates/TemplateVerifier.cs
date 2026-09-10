@@ -35,8 +35,32 @@ namespace ObjecTalk.Infrastructure.Vision
         /// </summary>
         public static bool LogScores;
 
+        private readonly float _templateFraction;
+
         private byte[] _rgba;
         private bool _disposed;
+
+        public TemplateVerifier()
+            : this(TemplateMatch.DefaultTemplateFraction)
+        {
+        }
+
+        /// <summary>
+        /// <paramref name="templateFraction"/> is how much of the prepared view becomes the
+        /// template. Smaller carries less of the surface the object was photographed on, which the
+        /// device pass suggested was drowning the match; too small leaves too little of the object
+        /// to be distinctive. Tunable because only the device can settle it.
+        /// </summary>
+        public TemplateVerifier(float templateFraction)
+        {
+            if (templateFraction <= 0f || templateFraction > 1f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(templateFraction), "The template fraction must be within (0, 1].");
+            }
+
+            _templateFraction = templateFraction;
+        }
 
         public void Initialize()
         {
@@ -52,7 +76,7 @@ namespace ObjecTalk.Infrastructure.Vision
             ThrowIfDisposed();
             var prepared = Prepare(image);
             var template = TemplatePreparation.CentreCrop(
-                prepared, TemplateMatch.DefaultSearchSize, TemplateMatch.DefaultTemplateFraction);
+                prepared, TemplateMatch.DefaultSearchSize, _templateFraction);
             var side = (int)Math.Sqrt(template.Length);
             return new TemplateSample(template, side);
         }
