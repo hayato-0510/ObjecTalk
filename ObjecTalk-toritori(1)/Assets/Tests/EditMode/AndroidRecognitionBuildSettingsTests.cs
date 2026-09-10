@@ -36,6 +36,11 @@ namespace ObjecTalk.Tests.EditMode
         [Test]
         public void BuildsArm64Only()
         {
+            // ARM64 is forced by com.unity.webrtc, whose libwebrtc.aar carries arm64-v8a and
+            // x86_64 only; an ARMv7 player dies with DllNotFoundException: webrtc and loses the
+            // realtime voice conversation. OpenCV+Unity ships the opposite pair (armeabi-v7a and
+            // x86), so AKAZE cannot run here either - Android installs one ABI per APK, and voice
+            // is the feature that has to win. See NullLocalFeatureVerifier for the fallback.
             Assert.That(PlayerSettings.Android.targetArchitectures, Is.EqualTo(AndroidArchitecture.ARM64));
         }
 

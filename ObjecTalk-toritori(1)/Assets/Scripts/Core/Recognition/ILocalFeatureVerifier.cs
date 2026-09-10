@@ -41,9 +41,10 @@ namespace ObjecTalk.Core.Recognition
         ILocalFeatureSample Restore(LocalFeatureBlob blob);
 
         /// <summary>
-        /// True when <paramref name="image"/> shares at least <paramref name="minimumMatches"/>
-        /// close descriptors with <paramref name="reference"/>.
+        /// Confirms <paramref name="image"/> against <paramref name="reference"/> when they share at
+        /// least <paramref name="minimumMatches"/> close descriptors, and reports where those
+        /// matches clustered so the caller can follow the object.
         /// </summary>
-        bool Verify(Texture2D image, ILocalFeatureSample reference, int minimumMatches);
+        LocalVerificationResult Verify(Texture2D image, ILocalFeatureSample reference, int minimumMatches);
     }
 }

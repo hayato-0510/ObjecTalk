@@ -456,9 +456,10 @@ namespace ObjecTalk.Core.Recognition
 
             // Local verification is the expensive half, so it runs for the one candidate that
             // already cleared the neural threshold and the ambiguity margin, and for nothing else.
-            var verified = candidate.HasValue && VerifyLocally(candidate.Value.Label)
-                ? candidate
-                : null;
+            var verification = candidate.HasValue
+                ? VerifyLocally(candidate.Value.Label)
+                : LocalVerificationResult.Rejected;
+            var verified = verification.IsVerified ? candidate : null;
 
             var stabilized = _filter.Observe(verified, now);
             _scheduler.Complete(_pendingSchedulerToken, now, now - _runStartedSeconds);
@@ -470,7 +471,10 @@ namespace ObjecTalk.Core.Recognition
                     RecognitionTickStatus.Recognized,
                     stabilized.Value.Label,
                     stabilized.Value.Score,
-                    _captures.Count)
+                    _captures.Count,
+                    verification.HasLocation,
+                    verification.RelativeX,
+                    verification.RelativeY)
                 : Result(RecognitionTickStatus.NotRecognized);
         }
 
@@ -495,23 +499,25 @@ namespace ObjecTalk.Core.Recognition
             return Result(RecognitionTickStatus.Failed);
         }
 
-        private bool VerifyLocally(string objectId)
+        private LocalVerificationResult VerifyLocally(string objectId)
         {
             if (_activeFrame == null || !_references.TryGetValue(objectId, out var references))
             {
-                return false;
+                return LocalVerificationResult.Rejected;
             }
 
             var verificationFrame = _preprocessor.CopyVerificationFrame(_activeFrame);
             for (var i = 0; i < references.Count; i++)
             {
-                if (_verifier.Verify(verificationFrame, references[i], _settings.MinimumLocalMatchCount))
+                var verification = _verifier.Verify(
+                    verificationFrame, references[i], _settings.MinimumLocalMatchCount);
+                if (verification.IsVerified)
                 {
-                    return true;
+                    return verification;
                 }
             }
 
-            return false;
+            return LocalVerificationResult.Rejected;
         }
 
         private void PublishStateChange(RecognitionCandidate? stabilized)

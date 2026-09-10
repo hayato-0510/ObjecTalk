@@ -34,7 +34,11 @@ namespace ObjecTalk.Tests.EditMode
         public void VerifyAlwaysPassesSoNeuralScreeningDecidesAlone()
         {
             using var reference = _verifier.Extract(_image);
-            Assert.That(_verifier.Verify(_image, reference, minimumMatches: 999), Is.True);
+
+            var verification = _verifier.Verify(_image, reference, minimumMatches: 999);
+
+            Assert.That(verification.IsVerified, Is.True);
+            Assert.That(verification.HasLocation, Is.False, "Without keypoints there is nothing to locate.");
         }
 
         [Test]

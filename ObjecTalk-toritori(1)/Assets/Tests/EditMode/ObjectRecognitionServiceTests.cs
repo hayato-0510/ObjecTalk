@@ -102,6 +102,53 @@ namespace ObjecTalk.Tests.EditMode
             Assert.That(_verifier.VerifyCallCount, Is.Zero, "An ambiguous best candidate must not reach verification.");
         }
 
+        // --- object location ------------------------------------------------------------------
+
+        [Test]
+        public void RecognizedTickCarriesTheLocationVerificationFound()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyLocation = (0.7f, 0.3f);
+
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.Recognized));
+            Assert.That(result.HasLocation, Is.True);
+            Assert.That(result.RelativeX, Is.EqualTo(0.7f).Within(1e-6f));
+            Assert.That(result.RelativeY, Is.EqualTo(0.3f).Within(1e-6f));
+        }
+
+        [Test]
+        public void RecognizedTickReportsNoLocationWhenTheMatchWasTooSparseToPlace()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyLocation = null;
+
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.Recognized));
+            Assert.That(result.HasLocation, Is.False);
+        }
+
+        [Test]
+        public void UnrecognizedTickReportsNoLocation()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyResult = false;
+            _verifier.VerifyLocation = (0.7f, 0.3f);
+
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.NotRecognized));
+            Assert.That(result.HasLocation, Is.False);
+        }
+
         // --- verification gating --------------------------------------------------------------
 
         [Test]

@@ -163,6 +163,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     [Tooltip("認識中の口オーバーレイの大きさ（プレビュー短辺に対する割合）。")]
     public float overlayMouthFraction = 0.22f;
 
+    [Range(0f, 0.5f)]
+    [Tooltip("顔オーバーレイが物体を追いかける滑らかさ（秒）。認識は毎秒2〜5回しか位置を出さないので、その間を補間する。0でスナップ。")]
+    public float faceTrackingTimeConstant = 0.12f;
+
     [Header("Style Selection UI")]
     public ScrollRect styleScrollViewRect;
     public GameObject styleButtonPrefab;
@@ -816,6 +820,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         // One bounded slice of work per frame, whichever kind of run is in flight.
         var result = _recognitionService.Tick(Time.timeAsDouble);
         HandleTickResult(result);
+        AdvanceFaceOverlayTracking();
     }
 
     private void HandleTickResult(RecognitionTickResult result)
@@ -823,6 +828,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         switch (result.Status)
         {
             case RecognitionTickStatus.Recognized:
+                // Set before the state change, so an object recognised this tick is placed at the
+                // spot it was actually found rather than gliding in from the centre.
+                _faceTrackedTarget = result.HasLocation
+                    ? new Vector2(result.RelativeX, result.RelativeY)
+                    : FrameCentre;
                 if (_objectsById.TryGetValue(result.ObjectId, out var recognized))
                 {
                     UpdateRecognitionState(true, recognized, result.ObjectId, result.Score);
@@ -1192,6 +1202,17 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     private static readonly Vector2 DefaultRelativeEyePosition = new Vector2(0.5f, 0.54f);
     private static readonly Vector2 DefaultRelativeMouthPosition = new Vector2(0.5f, 0.46f);
 
+    /// <summary>Where a registration capture puts its object, and so the "no tracking" position.</summary>
+    private static readonly Vector2 FrameCentre = new Vector2(0.5f, 0.5f);
+
+    // The object the overlay currently belongs to, where recognition last saw it, and where the
+    // overlay has eased to. Recognition only reports a position a few times a second, so the
+    // target and the drawn position are kept apart and bridged in Update.
+    private RegisteredObject _faceOverlayObject;
+    private Vector2 _faceTrackedTarget = FrameCentre;
+    private Vector2 _faceTrackedCurrent = FrameCentre;
+    private Vector2 _facePlacedAt = FrameCentre;
+
     private void ShowFaceOverlay(RegisteredObject obj)
     {
         if (DesiredMode != StartupMode.Talk || talkCameraDisplay == null)
@@ -1206,6 +1227,60 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             return;
         }
 
+        _faceOverlayObject = obj;
+
+        // Snap to wherever recognition just found the object; easing only applies to later moves.
+        _faceTrackedCurrent = _faceTrackedTarget;
+
+        Debug.Log($"[FaceDiag] ShowFaceOverlay: eyePos={obj.RelativeEyePosition} "
+            + $"(placed={IsPlaced(obj.RelativeEyePosition)}) mouthPos={obj.RelativeMouthPosition} "
+            + $"tracked={_faceTrackedTarget} "
+            + $"rect={talkCameraDisplay.rectTransform.rect.width}x{talkCameraDisplay.rectTransform.rect.height} "
+            + $"eyeStyles={(eyeStyles == null ? "NULL" : eyeStyles.Count.ToString())} "
+            + $"mouthStyles={(mouthStyles == null ? "NULL" : mouthStyles.Count.ToString())}.");
+
+        PlaceFaceOverlay(reportProblems: true);
+    }
+
+    /// <summary>
+    /// Eases the overlay toward the position recognition last reported. Recognition runs at two to
+    /// five hertz, so without this the face would step rather than follow.
+    /// </summary>
+    private void AdvanceFaceOverlayTracking()
+    {
+        if (_faceOverlayObject == null)
+        {
+            return;
+        }
+
+        _faceTrackedCurrent = new Vector2(
+            FaceOverlayTracking.Smooth(
+                _faceTrackedCurrent.x, _faceTrackedTarget.x, Time.deltaTime, faceTrackingTimeConstant),
+            FaceOverlayTracking.Smooth(
+                _faceTrackedCurrent.y, _faceTrackedTarget.y, Time.deltaTime, faceTrackingTimeConstant));
+
+        // A still object must not rewrite its RectTransforms every frame.
+        if ((_faceTrackedCurrent - _facePlacedAt).sqrMagnitude < 1e-8f)
+        {
+            return;
+        }
+
+        PlaceFaceOverlay(reportProblems: false);
+    }
+
+    /// <summary>
+    /// Draws both pieces at their registered spot shifted by the object's offset from the centre.
+    /// <paramref name="reportProblems"/> is false on the per-frame path so a misconfigured style
+    /// cannot fill the console.
+    /// </summary>
+    private void PlaceFaceOverlay(bool reportProblems)
+    {
+        var obj = _faceOverlayObject;
+        if (obj == null || talkCameraDisplay == null)
+        {
+            return;
+        }
+
         var previewRect = talkCameraDisplay.rectTransform.rect;
 
         Vector2 eyePos = IsPlaced(obj.RelativeEyePosition) ? obj.RelativeEyePosition : DefaultRelativeEyePosition;
@@ -1213,20 +1288,32 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         int eyeStyle = obj.EyeStyleId >= 0 ? obj.EyeStyleId : 0;
         int mouthStyle = obj.MouthStyleId >= 0 ? obj.MouthStyleId : 0;
 
-        Debug.Log($"[FaceDiag] ShowFaceOverlay: eyePos={eyePos} (placed={IsPlaced(obj.RelativeEyePosition)}) "
-            + $"mouthPos={mouthPos} eyeStyle={eyeStyle} mouthStyle={mouthStyle} "
-            + $"rect={previewRect.width}x{previewRect.height} "
-            + $"eyeStyles={(eyeStyles == null ? "NULL" : eyeStyles.Count.ToString())} "
-            + $"mouthStyles={(mouthStyles == null ? "NULL" : mouthStyles.Count.ToString())}.");
+        PlaceOverlayPiece(
+            recognitionEyeImage, eyeStyles, eyeStyle, Tracked(eyePos), overlayEyeFraction,
+            previewRect, reportProblems);
+        PlaceOverlayPiece(
+            recognitionMouthImage, mouthStyles, mouthStyle, Tracked(mouthPos), overlayMouthFraction,
+            previewRect, reportProblems);
 
-        PlaceOverlayPiece(recognitionEyeImage, eyeStyles, eyeStyle, eyePos, overlayEyeFraction, previewRect);
-        PlaceOverlayPiece(recognitionMouthImage, mouthStyles, mouthStyle, mouthPos, overlayMouthFraction, previewRect);
+        _facePlacedAt = _faceTrackedCurrent;
+    }
+
+    /// <summary>
+    /// Shifts one registered piece by the tracked offset. Clamped because a piece outside the
+    /// preview would otherwise trip the "never placed" sentinel and hide itself.
+    /// </summary>
+    private Vector2 Tracked(Vector2 registered)
+    {
+        var (x, y) = FaceOverlayTracking.TrackedPosition(
+            registered.x, registered.y, _faceTrackedCurrent.x, _faceTrackedCurrent.y);
+
+        return new Vector2(Mathf.Clamp01(x), Mathf.Clamp01(y));
     }
 
     private static bool IsPlaced(Vector2 relative) => relative.x >= 0f && relative.y >= 0f;
 
     private static void PlaceOverlayPiece(Image image, List<Sprite> styles, int styleId,
-        Vector2 relative, float fraction, Rect previewRect)
+        Vector2 relative, float fraction, Rect previewRect, bool reportProblems)
     {
         if (image == null)
         {
@@ -1239,10 +1326,14 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
                          && previewRect.width > 0f && previewRect.height > 0f;
         if (!placeable)
         {
-            Debug.LogWarning($"[FaceDiag] PlaceOverlayPiece not placeable: styleId={styleId}, "
-                + $"styles={(styles == null ? "NULL" : styles.Count.ToString())}, "
-                + $"styleOk={(styles != null && styleId >= 0 && styleId < styles.Count && styles[styleId] != null)}, "
-                + $"relative={relative}, rect={previewRect.width}x{previewRect.height}.");
+            if (reportProblems)
+            {
+                Debug.LogWarning($"[FaceDiag] PlaceOverlayPiece not placeable: styleId={styleId}, "
+                    + $"styles={(styles == null ? "NULL" : styles.Count.ToString())}, "
+                    + $"styleOk={(styles != null && styleId >= 0 && styleId < styles.Count && styles[styleId] != null)}, "
+                    + $"relative={relative}, rect={previewRect.width}x{previewRect.height}.");
+            }
+
             image.gameObject.SetActive(false);
             return;
         }
@@ -1265,6 +1356,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
     private void HideFaceOverlay()
     {
+        _faceOverlayObject = null;
+        _faceTrackedTarget = FrameCentre;
+        _faceTrackedCurrent = FrameCentre;
+        _facePlacedAt = FrameCentre;
         if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
         if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
     }
