@@ -18,10 +18,15 @@ namespace ObjecTalk.Infrastructure.Vision
         /// <summary>
         /// Marks a persisted blob as a template rather than AKAZE descriptors. Rows written by one
         /// backend are meaningless to the other, and reading them anyway yields a confident
-        /// position from noise - worse than reporting none. Positive because
-        /// <see cref="LocalFeatureBlob"/> refuses a negative descriptor type.
+        /// position from noise - worse than reporting none.
+        ///
+        /// This has to be a real OpenCV Mat type, not an arbitrary tag: the repository reads
+        /// descriptor_type as one and derives the expected blob length from its depth and channel
+        /// count, so an invented value fails validation and the registration is refused. CV_8S is
+        /// one byte per element like a grayscale pixel, and AKAZE only ever writes CV_8U, so the
+        /// two remain distinguishable.
         /// </summary>
-        public const int TemplateDescriptorType = 0x7E300001;
+        public const int TemplateDescriptorType = 1;   // CV_8S: depth 1, one channel
 
         private byte[] _rgba;
         private bool _disposed;
