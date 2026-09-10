@@ -592,6 +592,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         // 3. Hide registration flow panels initially
         if (placementPanel != null) placementPanel.SetActive(false);
         if (namingPanel != null) namingPanel.SetActive(false);
+        HideNamingFace();
 
         // 4. Decide which camera panel to show based on DesiredMode
         if (DesiredMode == StartupMode.Talk)
@@ -1535,6 +1536,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     }
 
     /// <summary>
+    /// Hides the naming preview's face. Placement turns these on and nothing else turns them off,
+    /// so every route out of the naming screen has to come through here.
+    /// </summary>
+    private void HideNamingFace()
+    {
+        if (namingEyeImage != null) namingEyeImage.gameObject.SetActive(false);
+        if (namingMouthImage != null) namingMouthImage.gameObject.SetActive(false);
+    }
+
+    /// <summary>
     /// Repeats the placed eye and mouth on the naming preview, so the user confirms the face they
     /// actually made rather than a bare photo. The positions were recorded against the placement
     /// screen, which showed the whole frame, while this preview shows only the centre square that
@@ -1880,6 +1891,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             Debug.Log("Back button pressed on Naming panel. Returning to placement.");
             currentMode = AppMode.Placement;
             if (namingPanel != null) namingPanel.SetActive(false);
+            HideNamingFace();
             if (placementPanel != null) placementPanel.SetActive(true);
             ShowOverlay(cropOverlayPlacement);
             // Re-populate styles
@@ -2017,6 +2029,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         // --- Panel Transition ---
         Debug.Log("Registration successful. Returning to selection panel.");
         if (namingPanel != null) namingPanel.SetActive(false);
+        HideNamingFace();
         if (talkSelectionPanel != null) talkSelectionPanel.SetActive(true);
         if (objectMatcherRootPanel != null) objectMatcherRootPanel.SetActive(false); // Triggers OnDisable
         // --- End ---
