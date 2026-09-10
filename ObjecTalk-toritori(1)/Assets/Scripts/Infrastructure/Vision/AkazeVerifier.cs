@@ -180,11 +180,20 @@ namespace ObjecTalk.Infrastructure.Vision
 
         /// <summary>
         /// Rebuilds a persisted capture. Returns null for a payload whose declared geometry does
-        /// not match its bytes, so one corrupt row cannot stop the rest of the database loading.
+        /// not match its bytes, or for one written by the template backend, so one unreadable row
+        /// cannot stop the rest of the database loading.
         /// </summary>
         public LocalFeatureSample Restore(LocalFeatureBlob blob)
         {
             ThrowIfDisposed();
+
+            // A template row's bytes are pixels, not descriptors. Deserialising them anyway would
+            // match noise against noise and confirm the wrong object; the mirror of the same
+            // refusal in TemplateVerifier.Restore.
+            if (blob.DescriptorType == TemplateVerifier.TemplateDescriptorType)
+            {
+                return null;
+            }
 
             var keypoints = LocalFeatureCodec.DeserializeKeypoints(blob.Keypoints);
             if (keypoints == null || keypoints.Length == 0)
