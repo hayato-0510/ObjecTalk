@@ -21,6 +21,21 @@ using UnityEngine.SceneManagement;
 /// registration UI; every recognition decision belongs to <see cref="ObjectRecognitionService"/>,
 /// which this controller only starts, ticks, and renders.
 /// </summary>
+/// <summary>
+/// Which local-feature backend confirms and locates a recognised object.
+/// </summary>
+public enum LocalFeatureBackend
+{
+    /// <summary>Correlation against the registration snapshot. The only one that runs on device.</summary>
+    Template = 0,
+
+    /// <summary>AKAZE. Editor only - OpenCV+Unity ships no arm64 native library.</summary>
+    Akaze = 1,
+
+    /// <summary>No local verification at all; the embedding decides alone.</summary>
+    None = 2,
+}
+
 public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSource
 {
     // ★★★ 物体認識フラグ ★★★
@@ -166,6 +181,16 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     [Range(0f, 0.5f)]
     [Tooltip("顔オーバーレイが物体を追いかける滑らかさ（秒）。認識は毎秒2〜5回しか位置を出さないので、その間を補間する。0でスナップ。")]
     public float faceTrackingTimeConstant = 0.12f;
+
+    [Tooltip("局所特徴のバックエンド。Template は実機で動く相関マッチ、Akaze は OpenCV が要るので Editor 専用。")]
+    public LocalFeatureBackend localFeatureBackend = LocalFeatureBackend.Template;
+
+    [Range(0f, 1f)]
+    [Tooltip("テンプレートの位置を信用する最低相関。下回ると顔は登録時の位置に戻る。")]
+    public float minimumTemplateScore = RecognitionSettings.DefaultMinimumTemplateScore;
+
+    [Tooltip("テンプレートが一致しないとき認識そのものを却下するか。実機でスコアを測るまで OFF。")]
+    public bool templateGatesRecognition = false;
 
     [Header("Style Selection UI")]
     public ScrollRect styleScrollViewRect;
@@ -375,20 +400,92 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     /// recognition rather than losing the whole pipeline. Restoring AKAZE later (adding the
     /// native library) needs no further code change.
     /// </summary>
+    /// <summary>
+    /// Objects registered before templates existed have AKAZE descriptors in their rows, which the
+    /// template backend cannot read - so they load with an embedding and no reference. Their
+    /// registration snapshot is still on the object row, so a template is built from that instead.
+    /// No schema change, no re-registration.
+    /// </summary>
+    private void SeedTemplatesFromSnapshots(List<ObjectItem> userObjects)
+    {
+        if (_recognitionService == null || _verifier == null || userObjects == null)
+        {
+            return;
+        }
+
+        var seeded = 0;
+        for (var i = 0; i < userObjects.Count; i++)
+        {
+            var item = userObjects[i];
+            if (item == null || string.IsNullOrEmpty(item.object_id)
+                || item.ImageData == null || item.ImageData.Length == 0)
+            {
+                continue;
+            }
+
+            var snapshot = new Texture2D(2, 2, TextureFormat.RGBA32, false, false);
+            try
+            {
+                // LoadImage yields RGBA32, which is what Extract requires.
+                if (!snapshot.LoadImage(item.ImageData))
+                {
+                    continue;
+                }
+
+                var sample = _verifier.Extract(snapshot);
+                if (sample == null || !sample.HasFeatures)
+                {
+                    sample?.Dispose();
+                    continue;
+                }
+
+                _recognitionService.SeedReferences(item.object_id, new[] { sample });
+                seeded++;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning(
+                    $"[Template] Could not seed '{item.object_id}': {e.GetType().Name}: {e.Message}");
+            }
+            finally
+            {
+                Destroy(snapshot);
+            }
+        }
+
+        if (seeded > 0)
+        {
+            Debug.Log($"[Template] Seeded {seeded} template(s) from registration snapshots.");
+        }
+    }
+
     private ILocalFeatureVerifier BuildLocalFeatureVerifier()
     {
-        try
+        switch (localFeatureBackend)
         {
-            var akaze = new AkazeVerifier();
-            akaze.Initialize();
-            return akaze;
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning(
-                "AKAZE local-feature verification is unavailable; recognition will rely on the "
-                + $"embedding model alone. ({e.GetType().Name}: {e.Message})");
-            return new NullLocalFeatureVerifier();
+            case LocalFeatureBackend.None:
+                return new NullLocalFeatureVerifier();
+
+            case LocalFeatureBackend.Akaze:
+                try
+                {
+                    var akaze = new AkazeVerifier();
+                    akaze.Initialize();
+                    return akaze;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning(
+                        "AKAZE local-feature verification is unavailable; recognition will rely on the "
+                        + $"embedding model alone. ({e.GetType().Name}: {e.Message})");
+                    return new NullLocalFeatureVerifier();
+                }
+
+            default:
+                // No native library, so nothing here can throw the way AKAZE does.
+                var templates = new TemplateVerifier();
+                templates.Initialize();
+                return templates;
         }
     }
 
@@ -405,7 +502,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             recognitionLossDelay,
             minimumInterval,
             maximumInterval,
-            Mathf.Max(1, minimumLocalMatchCount));
+            Mathf.Max(1, minimumLocalMatchCount),
+            Mathf.Clamp(minimumTemplateScore, -1f, 1f),
+            templateGatesRecognition);
     }
 
     // Start camera, load data, and set UI when the panel becomes active
@@ -1942,6 +2041,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         {
             Debug.LogError($"Failed to load recognition samples: {e}");
             return;
+        }
+
+        if (localFeatureBackend == LocalFeatureBackend.Template)
+        {
+            SeedTemplatesFromSnapshots(userObjects);
         }
 
         Debug.Log($"Loaded {_objectsById.Count} objects, {_recognitionService.RegisteredObjectCount} recognizable.");
