@@ -507,10 +507,10 @@ namespace ObjecTalk.Core.Recognition
             }
 
             var verificationFrame = _preprocessor.CopyVerificationFrame(_activeFrame);
+            var thresholds = LocalVerificationThresholds.From(_settings);
             for (var i = 0; i < references.Count; i++)
             {
-                var verification = _verifier.Verify(
-                    verificationFrame, references[i], _settings.MinimumLocalMatchCount);
+                var verification = _verifier.Verify(verificationFrame, references[i], thresholds);
                 if (verification.IsVerified)
                 {
                     return verification;

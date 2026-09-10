@@ -78,7 +78,27 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
-        public void MinimumLocalMatchCountComesFromSettings()
+        public void ThresholdsCarryBothTheMatchCountAndTheTemplateScore()
+        {
+            var settings = Settings(minimumLocalMatchCount: 17, minimumTemplateScore: 0.42f);
+
+            var thresholds = LocalVerificationThresholds.From(settings);
+
+            Assert.That(thresholds.MinimumMatches, Is.EqualTo(17));
+            Assert.That(thresholds.MinimumScore, Is.EqualTo(0.42f).Within(1e-6f));
+        }
+
+        [Test]
+        public void RecognitionIsNotGatedByTheTemplateScoreUnlessSettingsSaySo()
+        {
+            // The shipped default must be unable to reject anything the embedding accepted.
+            var thresholds = LocalVerificationThresholds.From(Settings());
+
+            Assert.That(thresholds.GatesRecognition, Is.False);
+        }
+
+        [Test]
+        public void TheVerifierIsGivenTheThresholdsFromSettings()
         {
             Build(Settings(minimumLocalMatchCount: 17, requiredConsecutiveHits: 1));
             SeedObjects((ObjectA, Unit(1f, 0f)));
@@ -86,7 +106,7 @@ namespace ObjecTalk.Tests.EditMode
 
             RunOneCycle(now: 0d);
 
-            Assert.That(_verifier.LastMinimumMatches, Is.EqualTo(17));
+            Assert.That(_verifier.LastThresholds.MinimumMatches, Is.EqualTo(17));
         }
 
         [Test]
@@ -442,7 +462,9 @@ namespace ObjecTalk.Tests.EditMode
             float similarityThreshold = 0.7f,
             float ambiguityMargin = 0.05f,
             int requiredConsecutiveHits = RecognitionSettings.DefaultRequiredConsecutiveHits,
-            int minimumLocalMatchCount = RecognitionSettings.DefaultMinimumLocalMatchCount)
+            int minimumLocalMatchCount = RecognitionSettings.DefaultMinimumLocalMatchCount,
+            float minimumTemplateScore = RecognitionSettings.DefaultMinimumTemplateScore,
+            bool templateGatesRecognition = false)
         {
             return new RecognitionSettings(
                 similarityThreshold,
@@ -451,7 +473,9 @@ namespace ObjecTalk.Tests.EditMode
                 RecognitionSettings.DefaultLossGracePeriodSeconds,
                 RecognitionSettings.MinimumSupportedRecognitionIntervalSeconds,
                 RecognitionSettings.MaximumSupportedRecognitionIntervalSeconds,
-                minimumLocalMatchCount);
+                minimumLocalMatchCount,
+                minimumTemplateScore,
+                templateGatesRecognition);
         }
 
         private void Build(RecognitionSettings settings)

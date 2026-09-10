@@ -86,7 +86,8 @@ namespace ObjecTalk.Infrastructure.Vision
             }
         }
 
-        public LocalVerificationResult Verify(Texture2D image, LocalFeatureSample reference, int minimumMatches)
+        public LocalVerificationResult Verify(
+            Texture2D image, LocalFeatureSample reference, in LocalVerificationThresholds thresholds)
         {
             ThrowIfDisposed();
             ThrowIfNotInitialized();
@@ -97,10 +98,10 @@ namespace ObjecTalk.Infrastructure.Vision
                 throw new ArgumentNullException(nameof(reference));
             }
 
-            if (minimumMatches < 1)
+            if (thresholds.MinimumMatches < 1)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(minimumMatches),
+                    nameof(thresholds),
                     "Verification requires at least one matching descriptor.");
             }
 
@@ -156,7 +157,7 @@ namespace ObjecTalk.Infrastructure.Vision
             var verified = LocalFeatureMatchPolicy.IsVerified(
                 new ReadOnlySpan<float>(_distanceBuffer, 0, matches.Length),
                 _maximumDescriptorDistance,
-                minimumMatches);
+                thresholds.MinimumMatches);
 
             if (!verified)
             {
@@ -170,7 +171,7 @@ namespace ObjecTalk.Infrastructure.Vision
                 new ReadOnlySpan<float>(_matchYBuffer, 0, located),
                 image.width,
                 image.height,
-                minimumMatches,
+                thresholds.MinimumMatches,
                 out var relativeX,
                 out var relativeY)
                 ? LocalVerificationResult.VerifiedAt(relativeX, relativeY)
@@ -228,7 +229,7 @@ namespace ObjecTalk.Infrastructure.Vision
         }
 
         LocalVerificationResult ILocalFeatureVerifier.Verify(
-            Texture2D image, ILocalFeatureSample reference, int minimumMatches)
+            Texture2D image, ILocalFeatureSample reference, in LocalVerificationThresholds thresholds)
         {
             if (reference == null)
             {
@@ -237,7 +238,7 @@ namespace ObjecTalk.Infrastructure.Vision
 
             // Only this verifier's own samples carry the OpenCV matrix matching needs.
             return reference is LocalFeatureSample sample
-                ? Verify(image, sample, minimumMatches)
+                ? Verify(image, sample, thresholds)
                 : LocalVerificationResult.Rejected;
         }
 

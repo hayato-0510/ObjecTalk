@@ -35,7 +35,8 @@ namespace ObjecTalk.Tests.EditMode
         {
             using var reference = _verifier.Extract(_image);
 
-            var verification = _verifier.Verify(_image, reference, minimumMatches: 999);
+            var verification = _verifier.Verify(
+                _image, reference, new LocalVerificationThresholds(999, 0.99f, gatesRecognition: true));
 
             Assert.That(verification.IsVerified, Is.True);
             Assert.That(verification.HasLocation, Is.False, "Without keypoints there is nothing to locate.");

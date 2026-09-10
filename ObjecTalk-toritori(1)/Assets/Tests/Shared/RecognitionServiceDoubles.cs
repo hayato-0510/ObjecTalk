@@ -233,7 +233,7 @@ namespace ObjecTalk.Tests
 
         public int VerifyCallCount { get; private set; }
 
-        public int LastMinimumMatches { get; private set; } = -1;
+        public LocalVerificationThresholds LastThresholds { get; private set; }
 
         public IReadOnlyList<ILocalFeatureSample> VerifiedAgainst => _verified;
 
@@ -269,7 +269,8 @@ namespace ObjecTalk.Tests
             return RestoreFails ? null : new FakeLocalFeatureSample("restored");
         }
 
-        public LocalVerificationResult Verify(Texture2D image, ILocalFeatureSample reference, int minimumMatches)
+        public LocalVerificationResult Verify(
+            Texture2D image, ILocalFeatureSample reference, in LocalVerificationThresholds thresholds)
         {
             if (image == null)
             {
@@ -277,7 +278,7 @@ namespace ObjecTalk.Tests
             }
 
             VerifyCallCount++;
-            LastMinimumMatches = minimumMatches;
+            LastThresholds = thresholds;
             _verified.Add(reference);
 
             if (!VerifyResult)
