@@ -233,12 +233,15 @@ namespace ObjecTalk.Tests
 
         public int VerifyCallCount { get; private set; }
 
-        public int LastMinimumMatches { get; private set; } = -1;
+        public LocalVerificationThresholds LastThresholds { get; private set; }
 
         public IReadOnlyList<ILocalFeatureSample> VerifiedAgainst => _verified;
 
         /// <summary>What <see cref="Verify"/> answers for every reference.</summary>
         public bool VerifyResult { get; set; } = true;
+
+        /// <summary>When set, a confirmed reference also reports this 0..1 location.</summary>
+        public (float x, float y)? VerifyLocation { get; set; }
 
         /// <summary>What a registration capture yields; false makes the capture featureless.</summary>
         public bool ExtractHasFeatures { get; set; } = true;
@@ -266,7 +269,8 @@ namespace ObjecTalk.Tests
             return RestoreFails ? null : new FakeLocalFeatureSample("restored");
         }
 
-        public bool Verify(Texture2D image, ILocalFeatureSample reference, int minimumMatches)
+        public LocalVerificationResult Verify(
+            Texture2D image, ILocalFeatureSample reference, in LocalVerificationThresholds thresholds)
         {
             if (image == null)
             {
@@ -274,9 +278,17 @@ namespace ObjecTalk.Tests
             }
 
             VerifyCallCount++;
-            LastMinimumMatches = minimumMatches;
+            LastThresholds = thresholds;
             _verified.Add(reference);
-            return VerifyResult;
+
+            if (!VerifyResult)
+            {
+                return LocalVerificationResult.Rejected;
+            }
+
+            return VerifyLocation.HasValue
+                ? LocalVerificationResult.VerifiedAt(VerifyLocation.Value.x, VerifyLocation.Value.y)
+                : LocalVerificationResult.Verified();
         }
 
         public void Dispose()

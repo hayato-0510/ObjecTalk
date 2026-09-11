@@ -24,7 +24,9 @@ namespace ObjecTalk.Core.Recognition
 
         public ILocalFeatureSample Restore(LocalFeatureBlob blob) => new Sample();
 
-        public bool Verify(Texture2D image, ILocalFeatureSample reference, int minimumMatches) => true;
+        public LocalVerificationResult Verify(
+            Texture2D image, ILocalFeatureSample reference, in LocalVerificationThresholds thresholds)
+            => LocalVerificationResult.Verified();
 
         public void Dispose()
         {

@@ -14,7 +14,8 @@
     "ObjecTalk.Domain.Conversation",
     "ObjecTalk.Core.Conversation",
     "ObjecTalk.Infrastructure.Conversation",
-    "ObjecTalk.Core.Exhibition"
+    "ObjecTalk.Core.Exhibition",
+    "ObjecTalk.Infrastructure.Vision.Templates"
   ],
   "includePlatforms": [
     "Editor"

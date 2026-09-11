@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using NUnit.Framework;
 using ObjecTalk.Infrastructure.Database;
+using ObjecTalk.Infrastructure.Vision;
 using SQLite;
 
 namespace ObjecTalk.Tests.EditMode
@@ -557,6 +558,57 @@ namespace ObjecTalk.Tests.EditMode
                 CreateSample(1, version, 2f),
                 CreateSample(2, version, 3f)
             };
+        }
+
+        [Test]
+        public void SaveSamples_AcceptsATemplateBackendSample()
+        {
+            // The repository reads descriptor_type as an OpenCV Mat type and derives the expected
+            // blob length from it, so a template's marker has to be a real type code, not an
+            // arbitrary tag. It was not, and every registration died with
+            // "Recognition sample metadata is invalid" on the device.
+            CreateOwningObject("object-1");
+            using (var repository = new RecognitionSampleRepository(_databasePath))
+            {
+                repository.SaveSamples("object-1", CreateTemplateSamples(CurrentVersion));
+
+                var loaded = repository.LoadValidSamples("user-1", CurrentVersion);
+
+                Assert.That(loaded, Has.Count.EqualTo(3));
+                Assert.That(loaded[0].DescriptorType, Is.EqualTo(TemplateVerifier.TemplateDescriptorType));
+                Assert.That(loaded[0].DescriptorBlob.Length, Is.EqualTo(TemplateSide * TemplateSide));
+            }
+        }
+
+        /// <summary>The side length TemplateVerifier produces: 64 search size at half fraction.</summary>
+        private const int TemplateSide = 32;
+
+        private static IReadOnlyList<RecognitionSampleRecord> CreateTemplateSamples(RecognitionDataVersion version)
+        {
+            return new[]
+            {
+                CreateTemplateSample(0, version, 1f),
+                CreateTemplateSample(1, version, 2f),
+                CreateTemplateSample(2, version, 3f)
+            };
+        }
+
+        private static RecognitionSampleRecord CreateTemplateSample(
+            int sampleIndex,
+            RecognitionDataVersion version,
+            float firstEmbeddingValue)
+        {
+            return new RecognitionSampleRecord(
+                sampleIndex,
+                version,
+                new[] { firstEmbeddingValue, 3f, 4f, 5f },
+                new byte[] { 0 },
+                TemplateSide,
+                TemplateSide,
+                TemplateVerifier.TemplateDescriptorType,
+                new byte[TemplateSide * TemplateSide],
+                TemplateSide,
+                TemplateSide);
         }
 
         private static RecognitionSampleRecord CreateSample(

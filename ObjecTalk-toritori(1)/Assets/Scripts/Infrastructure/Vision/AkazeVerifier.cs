@@ -27,6 +27,8 @@ namespace ObjecTalk.Infrastructure.Vision
         private Mat _grayMat;
         private Mat _liveDescriptors;
         private float[] _distanceBuffer;
+        private float[] _matchXBuffer;
+        private float[] _matchYBuffer;
         private int _bufferWidth;
         private int _bufferHeight;
         private bool _disposed;
@@ -84,7 +86,8 @@ namespace ObjecTalk.Infrastructure.Vision
             }
         }
 
-        public bool Verify(Texture2D image, LocalFeatureSample reference, int minimumMatches)
+        public LocalVerificationResult Verify(
+            Texture2D image, LocalFeatureSample reference, in LocalVerificationThresholds thresholds)
         {
             ThrowIfDisposed();
             ThrowIfNotInitialized();
@@ -95,23 +98,23 @@ namespace ObjecTalk.Infrastructure.Vision
                 throw new ArgumentNullException(nameof(reference));
             }
 
-            if (minimumMatches < 1)
+            if (thresholds.MinimumMatches < 1)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(minimumMatches),
+                    nameof(thresholds),
                     "Verification requires at least one matching descriptor.");
             }
 
             if (!reference.HasFeatures)
             {
-                return false;
+                return LocalVerificationResult.Rejected;
             }
 
             UpdateGrayscale(image);
             _detector.DetectAndCompute(_grayMat, null, out var liveKeypoints, _liveDescriptors);
             if (liveKeypoints.Length == 0 || _liveDescriptors.Empty())
             {
-                return false;
+                return LocalVerificationResult.Rejected;
             }
 
             // Brute-force matching requires identical descriptor layouts; a mismatch means the
@@ -119,29 +122,78 @@ namespace ObjecTalk.Infrastructure.Vision
             if (reference.Descriptors.Type() != _liveDescriptors.Type()
                 || reference.Descriptors.Cols != _liveDescriptors.Cols)
             {
-                return false;
+                return LocalVerificationResult.Rejected;
             }
 
             var matches = _matcher.Match(reference.Descriptors, _liveDescriptors);
-            EnsureDistanceBuffer(matches.Length);
+            EnsureMatchBuffers(matches.Length);
+
+            // The same pass that scores the match also records where each close descriptor landed
+            // in the live frame, so locating the object costs no extra OpenCV work. Matching runs
+            // reference-as-query against live-as-train, so TrainIdx indexes the live keypoints.
+            var located = 0;
             for (var i = 0; i < matches.Length; i++)
             {
-                _distanceBuffer[i] = matches[i].Distance;
+                var distance = matches[i].Distance;
+                _distanceBuffer[i] = distance;
+
+                if (distance < 0f || distance >= _maximumDescriptorDistance)
+                {
+                    continue;
+                }
+
+                var liveIndex = matches[i].TrainIdx;
+                if (liveIndex < 0 || liveIndex >= liveKeypoints.Length)
+                {
+                    continue;
+                }
+
+                var point = liveKeypoints[liveIndex].Pt;
+                _matchXBuffer[located] = point.X;
+                _matchYBuffer[located] = point.Y;
+                located++;
             }
 
-            return LocalFeatureMatchPolicy.IsVerified(
+            var verified = LocalFeatureMatchPolicy.IsVerified(
                 new ReadOnlySpan<float>(_distanceBuffer, 0, matches.Length),
                 _maximumDescriptorDistance,
-                minimumMatches);
+                thresholds.MinimumMatches);
+
+            if (!verified)
+            {
+                return LocalVerificationResult.Rejected;
+            }
+
+            // UpdateGrayscale flips the Unity texture upright, so these are top-left-origin pixels;
+            // FeatureCentroid flips the vertical axis back for the overlay's convention.
+            return FeatureCentroid.TryCompute(
+                new ReadOnlySpan<float>(_matchXBuffer, 0, located),
+                new ReadOnlySpan<float>(_matchYBuffer, 0, located),
+                image.width,
+                image.height,
+                thresholds.MinimumMatches,
+                out var relativeX,
+                out var relativeY)
+                ? LocalVerificationResult.VerifiedAt(relativeX, relativeY)
+                : LocalVerificationResult.Verified();
         }
 
         /// <summary>
         /// Rebuilds a persisted capture. Returns null for a payload whose declared geometry does
-        /// not match its bytes, so one corrupt row cannot stop the rest of the database loading.
+        /// not match its bytes, or for one written by the template backend, so one unreadable row
+        /// cannot stop the rest of the database loading.
         /// </summary>
         public LocalFeatureSample Restore(LocalFeatureBlob blob)
         {
             ThrowIfDisposed();
+
+            // A template row's bytes are pixels, not descriptors. Deserialising them anyway would
+            // match noise against noise and confirm the wrong object; the mirror of the same
+            // refusal in TemplateVerifier.Restore.
+            if (blob.DescriptorType == TemplateVerifier.TemplateDescriptorType)
+            {
+                return null;
+            }
 
             var keypoints = LocalFeatureCodec.DeserializeKeypoints(blob.Keypoints);
             if (keypoints == null || keypoints.Length == 0)
@@ -185,7 +237,8 @@ namespace ObjecTalk.Infrastructure.Vision
             return Restore(blob);
         }
 
-        bool ILocalFeatureVerifier.Verify(Texture2D image, ILocalFeatureSample reference, int minimumMatches)
+        LocalVerificationResult ILocalFeatureVerifier.Verify(
+            Texture2D image, ILocalFeatureSample reference, in LocalVerificationThresholds thresholds)
         {
             if (reference == null)
             {
@@ -193,7 +246,9 @@ namespace ObjecTalk.Infrastructure.Vision
             }
 
             // Only this verifier's own samples carry the OpenCV matrix matching needs.
-            return reference is LocalFeatureSample sample && Verify(image, sample, minimumMatches);
+            return reference is LocalFeatureSample sample
+                ? Verify(image, sample, thresholds)
+                : LocalVerificationResult.Rejected;
         }
 
         public void Dispose()
@@ -254,12 +309,17 @@ namespace ObjecTalk.Infrastructure.Vision
             _bufferHeight = height;
         }
 
-        private void EnsureDistanceBuffer(int length)
+        private void EnsureMatchBuffers(int length)
         {
-            if (_distanceBuffer == null || _distanceBuffer.Length < length)
+            if (_distanceBuffer != null && _distanceBuffer.Length >= length)
             {
-                _distanceBuffer = new float[Math.Max(length, 256)];
+                return;
             }
+
+            var size = Math.Max(length, 256);
+            _distanceBuffer = new float[size];
+            _matchXBuffer = new float[size];
+            _matchYBuffer = new float[size];
         }
 
         private void ReleaseImageBuffers()

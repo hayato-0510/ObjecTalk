@@ -160,13 +160,16 @@ namespace ObjecTalk.Core.Recognition
                     continue;
                 }
 
+                // A backend that cannot read this row's blob costs the object its position, not
+                // its identity: the embedding still recognises it, and a template can be seeded
+                // later. Dropping the record here would unregister the object outright.
+                _samples.Add(sample);
                 if (features == null || !features.HasFeatures)
                 {
                     features?.Dispose();
                     continue;
                 }
 
-                _samples.Add(sample);
                 AddReference(record.ObjectId, features);
             }
         }
@@ -456,9 +459,10 @@ namespace ObjecTalk.Core.Recognition
 
             // Local verification is the expensive half, so it runs for the one candidate that
             // already cleared the neural threshold and the ambiguity margin, and for nothing else.
-            var verified = candidate.HasValue && VerifyLocally(candidate.Value.Label)
-                ? candidate
-                : null;
+            var verification = candidate.HasValue
+                ? VerifyLocally(candidate.Value.Label)
+                : LocalVerificationResult.Rejected;
+            var verified = verification.IsVerified ? candidate : null;
 
             var stabilized = _filter.Observe(verified, now);
             _scheduler.Complete(_pendingSchedulerToken, now, now - _runStartedSeconds);
@@ -470,7 +474,10 @@ namespace ObjecTalk.Core.Recognition
                     RecognitionTickStatus.Recognized,
                     stabilized.Value.Label,
                     stabilized.Value.Score,
-                    _captures.Count)
+                    _captures.Count,
+                    verification.HasLocation,
+                    verification.RelativeX,
+                    verification.RelativeY)
                 : Result(RecognitionTickStatus.NotRecognized);
         }
 
@@ -495,23 +502,32 @@ namespace ObjecTalk.Core.Recognition
             return Result(RecognitionTickStatus.Failed);
         }
 
-        private bool VerifyLocally(string objectId)
+        private LocalVerificationResult VerifyLocally(string objectId)
         {
-            if (_activeFrame == null || !_references.TryGetValue(objectId, out var references))
+            if (_activeFrame == null)
             {
-                return false;
+                return LocalVerificationResult.Rejected;
+            }
+
+            // No references means no backend could read this object's blob. Recognition then rests
+            // on the embedding alone, which is what the device already does without AKAZE.
+            if (!_references.TryGetValue(objectId, out var references) || references.Count == 0)
+            {
+                return LocalVerificationResult.Verified();
             }
 
             var verificationFrame = _preprocessor.CopyVerificationFrame(_activeFrame);
+            var thresholds = LocalVerificationThresholds.From(_settings);
             for (var i = 0; i < references.Count; i++)
             {
-                if (_verifier.Verify(verificationFrame, references[i], _settings.MinimumLocalMatchCount))
+                var verification = _verifier.Verify(verificationFrame, references[i], thresholds);
+                if (verification.IsVerified)
                 {
-                    return true;
+                    return verification;
                 }
             }
 
-            return false;
+            return LocalVerificationResult.Rejected;
         }
 
         private void PublishStateChange(RecognitionCandidate? stabilized)
@@ -571,6 +587,50 @@ namespace ObjecTalk.Core.Recognition
             if (_embedding == null || _embedding.Length != dimension)
             {
                 _embedding = new float[dimension];
+            }
+        }
+
+        /// <summary>
+        /// Supplies references for an object whose persisted blob this backend could not read -
+        /// the presentation layer builds them from the registration snapshot it already holds.
+        /// A restored reference is authoritative, so an object that already has one is untouched,
+        /// and an object this service has never loaded is ignored rather than invented.
+        /// Takes a list because a later version stores one template per registration capture.
+        /// </summary>
+        public void SeedReferences(string objectId, IReadOnlyList<ILocalFeatureSample> references)
+        {
+            ThrowIfDisposed();
+            if (string.IsNullOrEmpty(objectId) || references == null || references.Count == 0)
+            {
+                return;
+            }
+
+            if (_references.TryGetValue(objectId, out var existing) && existing.Count > 0)
+            {
+                return;
+            }
+
+            var known = false;
+            for (var i = 0; i < _samples.Count; i++)
+            {
+                if (string.Equals(_samples[i].Label, objectId, StringComparison.Ordinal))
+                {
+                    known = true;
+                    break;
+                }
+            }
+
+            if (!known)
+            {
+                return;
+            }
+
+            for (var i = 0; i < references.Count; i++)
+            {
+                if (references[i] != null && references[i].HasFeatures)
+                {
+                    AddReference(objectId, references[i]);
+                }
             }
         }
 

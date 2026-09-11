@@ -55,6 +55,13 @@ namespace ObjecTalk.Domain.Recognition
         public const float MaximumSupportedRecognitionIntervalSeconds = 0.5f;
         public const int DefaultMinimumLocalMatchCount = 10;
 
+        /// <summary>
+        /// Correlation a template must reach before its position is believed. Measured on
+        /// synthetic frames: combined move+zoom+tilt scored 0.38, the weakest true match 0.31.
+        /// A starting point for the device pass, not a settled value.
+        /// </summary>
+        public const float DefaultMinimumTemplateScore = 0.35f;
+
         public RecognitionSettings(float similarityThreshold, float ambiguityMargin)
             : this(
                 similarityThreshold,
@@ -92,6 +99,29 @@ namespace ObjecTalk.Domain.Recognition
             float minimumRecognitionIntervalSeconds,
             float maximumRecognitionIntervalSeconds,
             int minimumLocalMatchCount)
+            : this(
+                similarityThreshold,
+                ambiguityMargin,
+                requiredConsecutiveHits,
+                lossGracePeriodSeconds,
+                minimumRecognitionIntervalSeconds,
+                maximumRecognitionIntervalSeconds,
+                minimumLocalMatchCount,
+                DefaultMinimumTemplateScore,
+                false)
+        {
+        }
+
+        public RecognitionSettings(
+            float similarityThreshold,
+            float ambiguityMargin,
+            int requiredConsecutiveHits,
+            float lossGracePeriodSeconds,
+            float minimumRecognitionIntervalSeconds,
+            float maximumRecognitionIntervalSeconds,
+            int minimumLocalMatchCount,
+            float minimumTemplateScore,
+            bool templateGatesRecognition)
         {
             if (float.IsNaN(similarityThreshold) || float.IsInfinity(similarityThreshold))
             {
@@ -113,6 +143,18 @@ namespace ObjecTalk.Domain.Recognition
                 throw new ArgumentOutOfRangeException(
                     nameof(minimumLocalMatchCount),
                     "Local verification requires at least one matching descriptor.");
+            }
+
+            // Correlation is bounded by definition; a threshold outside it can never be met, or
+            // can never be missed, and either way the caller has made a mistake worth reporting.
+            if (float.IsNaN(minimumTemplateScore)
+                || float.IsInfinity(minimumTemplateScore)
+                || minimumTemplateScore < -1f
+                || minimumTemplateScore > 1f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(minimumTemplateScore),
+                    "A correlation threshold must lie within [-1, 1].");
             }
 
             if (float.IsNaN(lossGracePeriodSeconds) || float.IsInfinity(lossGracePeriodSeconds) || lossGracePeriodSeconds < 0f)
@@ -141,6 +183,8 @@ namespace ObjecTalk.Domain.Recognition
             MinimumRecognitionIntervalSeconds = clampedMinimumIntervalSeconds;
             MaximumRecognitionIntervalSeconds = clampedMaximumIntervalSeconds;
             MinimumLocalMatchCount = minimumLocalMatchCount;
+            MinimumTemplateScore = minimumTemplateScore;
+            TemplateGatesRecognition = templateGatesRecognition;
         }
 
         public float SimilarityThreshold { get; }
@@ -160,6 +204,15 @@ namespace ObjecTalk.Domain.Recognition
         /// Kept here so no production call site hard-codes a verification threshold.
         /// </summary>
         public int MinimumLocalMatchCount { get; }
+
+        /// <summary>Correlation a template must reach before its position is believed.</summary>
+        public float MinimumTemplateScore { get; }
+
+        /// <summary>
+        /// Whether a template that fails to match may reject a candidate the embedding accepted.
+        /// Off until real device scores have been measured; on is a deliberate second step.
+        /// </summary>
+        public bool TemplateGatesRecognition { get; }
 
         private static float ClampRecognitionInterval(float seconds, string paramName)
         {

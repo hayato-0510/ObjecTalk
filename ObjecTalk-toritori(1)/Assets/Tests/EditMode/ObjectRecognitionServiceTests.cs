@@ -78,7 +78,27 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
-        public void MinimumLocalMatchCountComesFromSettings()
+        public void ThresholdsCarryBothTheMatchCountAndTheTemplateScore()
+        {
+            var settings = Settings(minimumLocalMatchCount: 17, minimumTemplateScore: 0.42f);
+
+            var thresholds = LocalVerificationThresholds.From(settings);
+
+            Assert.That(thresholds.MinimumMatches, Is.EqualTo(17));
+            Assert.That(thresholds.MinimumScore, Is.EqualTo(0.42f).Within(1e-6f));
+        }
+
+        [Test]
+        public void RecognitionIsNotGatedByTheTemplateScoreUnlessSettingsSaySo()
+        {
+            // The shipped default must be unable to reject anything the embedding accepted.
+            var thresholds = LocalVerificationThresholds.From(Settings());
+
+            Assert.That(thresholds.GatesRecognition, Is.False);
+        }
+
+        [Test]
+        public void TheVerifierIsGivenTheThresholdsFromSettings()
         {
             Build(Settings(minimumLocalMatchCount: 17, requiredConsecutiveHits: 1));
             SeedObjects((ObjectA, Unit(1f, 0f)));
@@ -86,7 +106,7 @@ namespace ObjecTalk.Tests.EditMode
 
             RunOneCycle(now: 0d);
 
-            Assert.That(_verifier.LastMinimumMatches, Is.EqualTo(17));
+            Assert.That(_verifier.LastThresholds.MinimumMatches, Is.EqualTo(17));
         }
 
         [Test]
@@ -100,6 +120,128 @@ namespace ObjecTalk.Tests.EditMode
 
             Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.NotRecognized));
             Assert.That(_verifier.VerifyCallCount, Is.Zero, "An ambiguous best candidate must not reach verification.");
+        }
+
+        // --- object location ------------------------------------------------------------------
+
+        [Test]
+        public void RecognizedTickCarriesTheLocationVerificationFound()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyLocation = (0.7f, 0.3f);
+
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.Recognized));
+            Assert.That(result.HasLocation, Is.True);
+            Assert.That(result.RelativeX, Is.EqualTo(0.7f).Within(1e-6f));
+            Assert.That(result.RelativeY, Is.EqualTo(0.3f).Within(1e-6f));
+        }
+
+        [Test]
+        public void RecognizedTickReportsNoLocationWhenTheMatchWasTooSparseToPlace()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyLocation = null;
+
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.Recognized));
+            Assert.That(result.HasLocation, Is.False);
+        }
+
+        [Test]
+        public void UnrecognizedTickReportsNoLocation()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyResult = false;
+            _verifier.VerifyLocation = (0.7f, 0.3f);
+
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.NotRecognized));
+            Assert.That(result.HasLocation, Is.False);
+        }
+
+        // --- loading resilience ---------------------------------------------------------------
+
+        [Test]
+        public void AnObjectWhoseLocalFeaturesCannotBeRestoredIsStillRecognized()
+        {
+            // A backend that cannot read the persisted blob must cost the object its position,
+            // never its embedding - otherwise switching backends unregisters everything.
+            _verifier.RestoreFails = true;
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.Recognized));
+            Assert.That(result.ObjectId, Is.EqualTo(ObjectA));
+            Assert.That(result.HasLocation, Is.False);
+        }
+
+        [Test]
+        public void AnObjectWithNoReferencesNeverReachesTheVerifier()
+        {
+            _verifier.RestoreFails = true;
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+
+            RunOneCycle(now: 0d);
+
+            Assert.That(_verifier.VerifyCallCount, Is.Zero);
+        }
+
+        // --- seeding --------------------------------------------------------------------------
+
+        [Test]
+        public void SeededReferencesGiveAnObjectAPositionItCouldNotRestore()
+        {
+            _verifier.RestoreFails = true;
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+            _extractor.ScriptResult(1f, 0f);
+            _verifier.VerifyLocation = (0.62f, 0.28f);
+
+            _service.SeedReferences(ObjectA, new ILocalFeatureSample[] { new FakeLocalFeatureSample("seeded") });
+            var result = RunOneCycle(now: 0d);
+
+            Assert.That(result.Status, Is.EqualTo(RecognitionTickStatus.Recognized));
+            Assert.That(result.HasLocation, Is.True);
+            Assert.That(result.RelativeX, Is.EqualTo(0.62f).Within(1e-6f));
+        }
+
+        [Test]
+        public void SeedingLeavesARestoredReferenceAlone()
+        {
+            Build(Settings(requiredConsecutiveHits: 1));
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+
+            _service.SeedReferences(ObjectA, new ILocalFeatureSample[] { new FakeLocalFeatureSample("seeded") });
+            _extractor.ScriptResult(1f, 0f);
+            RunOneCycle(now: 0d);
+
+            Assert.That(_verifier.VerifiedAgainst.Count, Is.EqualTo(1),
+                "the persisted reference is authoritative; seeding must not add a second one");
+        }
+
+        [Test]
+        public void SeedingAnUnknownObjectIsIgnored()
+        {
+            Build(Settings());
+            SeedObjects((ObjectA, Unit(1f, 0f)));
+
+            Assert.DoesNotThrow(() => _service.SeedReferences(
+                "no-such-object", new ILocalFeatureSample[] { new FakeLocalFeatureSample("seeded") }));
         }
 
         // --- verification gating --------------------------------------------------------------
@@ -233,16 +375,19 @@ namespace ObjecTalk.Tests.EditMode
         }
 
         [Test]
-        public void ASampleWhoseLocalFeaturesCannotBeRestoredIsSkipped()
+        public void ASampleWhoseLocalFeaturesCannotBeRestoredKeepsItsEmbedding()
         {
+            // This used to drop the whole record. A backend that cannot read the persisted blob
+            // - the template backend reading AKAZE descriptors, say - would then unregister every
+            // object it inherited. Losing the position is acceptable; losing the identity is not.
             Build(Settings());
             _store.Seed(Record(ObjectA, 0, Unit(1f, 0f)));
             _verifier.RestoreFails = true;
 
             _service.LoadSamples("user-1");
 
-            Assert.That(_service.LoadedSampleCount, Is.Zero);
-            Assert.That(_service.RegisteredObjectCount, Is.Zero);
+            Assert.That(_service.LoadedSampleCount, Is.EqualTo(1), "the embedding survives");
+            Assert.That(_service.RegisteredObjectCount, Is.Zero, "but it has no reference to match against");
         }
 
         // --- registration ---------------------------------------------------------------------
@@ -395,7 +540,9 @@ namespace ObjecTalk.Tests.EditMode
             float similarityThreshold = 0.7f,
             float ambiguityMargin = 0.05f,
             int requiredConsecutiveHits = RecognitionSettings.DefaultRequiredConsecutiveHits,
-            int minimumLocalMatchCount = RecognitionSettings.DefaultMinimumLocalMatchCount)
+            int minimumLocalMatchCount = RecognitionSettings.DefaultMinimumLocalMatchCount,
+            float minimumTemplateScore = RecognitionSettings.DefaultMinimumTemplateScore,
+            bool templateGatesRecognition = false)
         {
             return new RecognitionSettings(
                 similarityThreshold,
@@ -404,7 +551,9 @@ namespace ObjecTalk.Tests.EditMode
                 RecognitionSettings.DefaultLossGracePeriodSeconds,
                 RecognitionSettings.MinimumSupportedRecognitionIntervalSeconds,
                 RecognitionSettings.MaximumSupportedRecognitionIntervalSeconds,
-                minimumLocalMatchCount);
+                minimumLocalMatchCount,
+                minimumTemplateScore,
+                templateGatesRecognition);
         }
 
         private void Build(RecognitionSettings settings)

@@ -1,0 +1,17 @@
+{
+  "name": "ObjecTalk.Infrastructure.Vision.Templates",
+  "rootNamespace": "ObjecTalk.Infrastructure.Vision",
+  "references": [
+    "ObjecTalk.Domain.Recognition",
+    "ObjecTalk.Core.Recognition"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -21,6 +21,21 @@ using UnityEngine.SceneManagement;
 /// registration UI; every recognition decision belongs to <see cref="ObjectRecognitionService"/>,
 /// which this controller only starts, ticks, and renders.
 /// </summary>
+/// <summary>
+/// Which local-feature backend confirms and locates a recognised object.
+/// </summary>
+public enum LocalFeatureBackend
+{
+    /// <summary>Correlation against the registration snapshot. The only one that runs on device.</summary>
+    Template = 0,
+
+    /// <summary>AKAZE. Editor only - OpenCV+Unity ships no arm64 native library.</summary>
+    Akaze = 1,
+
+    /// <summary>No local verification at all; the embedding decides alone.</summary>
+    None = 2,
+}
+
 public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSource
 {
     // ★★★ 物体認識フラグ ★★★
@@ -92,6 +107,12 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
     [Header("Other UI Components")]
     public Image snapshotDisplay_Naming;
+
+    [Tooltip("命名画面のプレビューに重ねる目。配置画面で決めた位置がそのまま出る。")]
+    public Image namingEyeImage;
+
+    [Tooltip("命名画面のプレビューに重ねる口。")]
+    public Image namingMouthImage;
     public Image snapshotDisplay_Placement;
     public Button registerStartButton; // Button in RegisterCameraPanel
     public Button nextButton;
@@ -162,6 +183,27 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     [Range(0.05f, 0.5f)]
     [Tooltip("認識中の口オーバーレイの大きさ（プレビュー短辺に対する割合）。")]
     public float overlayMouthFraction = 0.22f;
+
+    [Range(0f, 0.5f)]
+    [Tooltip("顔オーバーレイが物体を追いかける滑らかさ（秒）。認識は毎秒2〜5回しか位置を出さないので、その間を補間する。0でスナップ。")]
+    public float faceTrackingTimeConstant = 0.12f;
+
+    [Tooltip("局所特徴のバックエンド。Template は実機で動く相関マッチ、Akaze は OpenCV が要るので Editor 専用。")]
+    public LocalFeatureBackend localFeatureBackend = LocalFeatureBackend.Template;
+
+    [Range(0f, 1f)]
+    [Tooltip("テンプレートの位置を信用する最低相関。下回ると顔は登録時の位置に戻る。")]
+    public float minimumTemplateScore = RecognitionSettings.DefaultMinimumTemplateScore;
+
+    [Tooltip("テンプレートが一致しないとき認識そのものを却下するか。実機でスコアを測るまで OFF。")]
+    public bool templateGatesRecognition = false;
+
+    [Tooltip("一時的な計測用。毎tickの追従位置と相関スコアをログに出す。しきい値を決めたら OFF。")]
+    public bool logTrackingDiagnostics = false;
+
+    [Range(0.15f, 1f)]
+    [Tooltip("プレビューのうちテンプレートにする割合。小さいほど背景が減るが、物体の手がかりも減る。")]
+    public float templateFraction = TemplateMatch.DefaultTemplateFraction;
 
     [Header("Style Selection UI")]
     public ScrollRect styleScrollViewRect;
@@ -339,6 +381,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             ImageGeometry.MaximumVerificationImageSize,
             guideFractionOfPreview,
             backgroundMaskFraction);
+        TemplateVerifier.LogScores = logTrackingDiagnostics;
         _verifier = BuildLocalFeatureVerifier();
         _extractor = new SentisEmbeddingExtractor();
 
@@ -371,20 +414,101 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     /// recognition rather than losing the whole pipeline. Restoring AKAZE later (adding the
     /// native library) needs no further code change.
     /// </summary>
+    /// <summary>
+    /// Objects registered before templates existed have AKAZE descriptors in their rows, which the
+    /// template backend cannot read - so they load with an embedding and no reference. Their
+    /// registration snapshot is still on the object row, so a template is built from that instead.
+    /// No schema change, no re-registration.
+    /// </summary>
+    private void SeedTemplatesFromSnapshots(List<ObjectItem> userObjects)
+    {
+        if (_recognitionService == null || _verifier == null || userObjects == null)
+        {
+            return;
+        }
+
+        var seeded = 0;
+        for (var i = 0; i < userObjects.Count; i++)
+        {
+            var item = userObjects[i];
+            if (item == null || string.IsNullOrEmpty(item.object_id)
+                || item.ImageData == null || item.ImageData.Length == 0)
+            {
+                continue;
+            }
+
+            var snapshot = new Texture2D(2, 2, TextureFormat.RGBA32, false, false);
+            try
+            {
+                // LoadImage yields RGBA32, which is what Extract requires.
+                if (!snapshot.LoadImage(item.ImageData))
+                {
+                    continue;
+                }
+
+                var sample = _verifier.Extract(snapshot);
+                if (sample == null || !sample.HasFeatures)
+                {
+                    sample?.Dispose();
+                    continue;
+                }
+
+                if (TemplateVerifier.LogScores)
+                {
+                    // Matching a picture against itself is the anchor the live numbers are read
+                    // against: near 1 here means the pipeline is sound and a low live score is
+                    // the scene having changed, not the maths being wrong.
+                    Debug.Log($"[TrackDiag] self-match for '{item.object_id}':");
+                    _verifier.Verify(snapshot, sample, LocalVerificationThresholds.From(BuildRecognitionSettings()));
+                }
+
+                _recognitionService.SeedReferences(item.object_id, new[] { sample });
+                seeded++;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning(
+                    $"[Template] Could not seed '{item.object_id}': {e.GetType().Name}: {e.Message}");
+            }
+            finally
+            {
+                Destroy(snapshot);
+            }
+        }
+
+        if (seeded > 0)
+        {
+            Debug.Log($"[Template] Seeded {seeded} template(s) from registration snapshots.");
+        }
+    }
+
     private ILocalFeatureVerifier BuildLocalFeatureVerifier()
     {
-        try
+        switch (localFeatureBackend)
         {
-            var akaze = new AkazeVerifier();
-            akaze.Initialize();
-            return akaze;
-        }
-        catch (Exception e)
-        {
-            Debug.LogWarning(
-                "AKAZE local-feature verification is unavailable; recognition will rely on the "
-                + $"embedding model alone. ({e.GetType().Name}: {e.Message})");
-            return new NullLocalFeatureVerifier();
+            case LocalFeatureBackend.None:
+                return new NullLocalFeatureVerifier();
+
+            case LocalFeatureBackend.Akaze:
+                try
+                {
+                    var akaze = new AkazeVerifier();
+                    akaze.Initialize();
+                    return akaze;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning(
+                        "AKAZE local-feature verification is unavailable; recognition will rely on the "
+                        + $"embedding model alone. ({e.GetType().Name}: {e.Message})");
+                    return new NullLocalFeatureVerifier();
+                }
+
+            default:
+                // No native library, so nothing here can throw the way AKAZE does.
+                var templates = new TemplateVerifier(Mathf.Clamp(templateFraction, 0.15f, 1f));
+                templates.Initialize();
+                return templates;
         }
     }
 
@@ -401,7 +525,9 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             recognitionLossDelay,
             minimumInterval,
             maximumInterval,
-            Mathf.Max(1, minimumLocalMatchCount));
+            Mathf.Max(1, minimumLocalMatchCount),
+            Mathf.Clamp(minimumTemplateScore, -1f, 1f),
+            templateGatesRecognition);
     }
 
     // Start camera, load data, and set UI when the panel becomes active
@@ -466,6 +592,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         // 3. Hide registration flow panels initially
         if (placementPanel != null) placementPanel.SetActive(false);
         if (namingPanel != null) namingPanel.SetActive(false);
+        HideNamingFace();
 
         // 4. Decide which camera panel to show based on DesiredMode
         if (DesiredMode == StartupMode.Talk)
@@ -816,6 +943,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         // One bounded slice of work per frame, whichever kind of run is in flight.
         var result = _recognitionService.Tick(Time.timeAsDouble);
         HandleTickResult(result);
+        AdvanceFaceOverlayTracking();
     }
 
     private void HandleTickResult(RecognitionTickResult result)
@@ -823,6 +951,21 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         switch (result.Status)
         {
             case RecognitionTickStatus.Recognized:
+                // Set before the state change, so an object recognised this tick is placed at the
+                // spot it was actually found rather than gliding in from the centre.
+                _faceTrackedTarget = result.HasLocation
+                    ? new Vector2(result.RelativeX, result.RelativeY)
+                    : FrameCentre;
+                // TEMPORARY (device tuning pass): the only way to choose a real
+                // minimumTemplateScore is to see what real frames actually score.
+                if (logTrackingDiagnostics)
+                {
+                    // Score here is the embedding's cosine similarity, not the correlation -
+                    // TemplateVerifier logs that one itself, where it is actually computed.
+                    Debug.Log($"[TrackDiag] located={result.HasLocation} "
+                        + $"pos=({result.RelativeX:F3},{result.RelativeY:F3}) "
+                        + $"embedding={result.Score:F3} id={result.ObjectId}");
+                }
                 if (_objectsById.TryGetValue(result.ObjectId, out var recognized))
                 {
                     UpdateRecognitionState(true, recognized, result.ObjectId, result.Score);
@@ -1192,6 +1335,17 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
     private static readonly Vector2 DefaultRelativeEyePosition = new Vector2(0.5f, 0.54f);
     private static readonly Vector2 DefaultRelativeMouthPosition = new Vector2(0.5f, 0.46f);
 
+    /// <summary>Where a registration capture puts its object, and so the "no tracking" position.</summary>
+    private static readonly Vector2 FrameCentre = new Vector2(0.5f, 0.5f);
+
+    // The object the overlay currently belongs to, where recognition last saw it, and where the
+    // overlay has eased to. Recognition only reports a position a few times a second, so the
+    // target and the drawn position are kept apart and bridged in Update.
+    private RegisteredObject _faceOverlayObject;
+    private Vector2 _faceTrackedTarget = FrameCentre;
+    private Vector2 _faceTrackedCurrent = FrameCentre;
+    private Vector2 _facePlacedAt = FrameCentre;
+
     private void ShowFaceOverlay(RegisteredObject obj)
     {
         if (DesiredMode != StartupMode.Talk || talkCameraDisplay == null)
@@ -1206,6 +1360,60 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             return;
         }
 
+        _faceOverlayObject = obj;
+
+        // Snap to wherever recognition just found the object; easing only applies to later moves.
+        _faceTrackedCurrent = _faceTrackedTarget;
+
+        Debug.Log($"[FaceDiag] ShowFaceOverlay: eyePos={obj.RelativeEyePosition} "
+            + $"(placed={IsPlaced(obj.RelativeEyePosition)}) mouthPos={obj.RelativeMouthPosition} "
+            + $"tracked={_faceTrackedTarget} "
+            + $"rect={talkCameraDisplay.rectTransform.rect.width}x{talkCameraDisplay.rectTransform.rect.height} "
+            + $"eyeStyles={(eyeStyles == null ? "NULL" : eyeStyles.Count.ToString())} "
+            + $"mouthStyles={(mouthStyles == null ? "NULL" : mouthStyles.Count.ToString())}.");
+
+        PlaceFaceOverlay(reportProblems: true);
+    }
+
+    /// <summary>
+    /// Eases the overlay toward the position recognition last reported. Recognition runs at two to
+    /// five hertz, so without this the face would step rather than follow.
+    /// </summary>
+    private void AdvanceFaceOverlayTracking()
+    {
+        if (_faceOverlayObject == null)
+        {
+            return;
+        }
+
+        _faceTrackedCurrent = new Vector2(
+            FaceOverlayTracking.Smooth(
+                _faceTrackedCurrent.x, _faceTrackedTarget.x, Time.deltaTime, faceTrackingTimeConstant),
+            FaceOverlayTracking.Smooth(
+                _faceTrackedCurrent.y, _faceTrackedTarget.y, Time.deltaTime, faceTrackingTimeConstant));
+
+        // A still object must not rewrite its RectTransforms every frame.
+        if ((_faceTrackedCurrent - _facePlacedAt).sqrMagnitude < 1e-8f)
+        {
+            return;
+        }
+
+        PlaceFaceOverlay(reportProblems: false);
+    }
+
+    /// <summary>
+    /// Draws both pieces at their registered spot shifted by the object's offset from the centre.
+    /// <paramref name="reportProblems"/> is false on the per-frame path so a misconfigured style
+    /// cannot fill the console.
+    /// </summary>
+    private void PlaceFaceOverlay(bool reportProblems)
+    {
+        var obj = _faceOverlayObject;
+        if (obj == null || talkCameraDisplay == null)
+        {
+            return;
+        }
+
         var previewRect = talkCameraDisplay.rectTransform.rect;
 
         Vector2 eyePos = IsPlaced(obj.RelativeEyePosition) ? obj.RelativeEyePosition : DefaultRelativeEyePosition;
@@ -1213,20 +1421,32 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         int eyeStyle = obj.EyeStyleId >= 0 ? obj.EyeStyleId : 0;
         int mouthStyle = obj.MouthStyleId >= 0 ? obj.MouthStyleId : 0;
 
-        Debug.Log($"[FaceDiag] ShowFaceOverlay: eyePos={eyePos} (placed={IsPlaced(obj.RelativeEyePosition)}) "
-            + $"mouthPos={mouthPos} eyeStyle={eyeStyle} mouthStyle={mouthStyle} "
-            + $"rect={previewRect.width}x{previewRect.height} "
-            + $"eyeStyles={(eyeStyles == null ? "NULL" : eyeStyles.Count.ToString())} "
-            + $"mouthStyles={(mouthStyles == null ? "NULL" : mouthStyles.Count.ToString())}.");
+        PlaceOverlayPiece(
+            recognitionEyeImage, eyeStyles, eyeStyle, Tracked(eyePos), overlayEyeFraction,
+            previewRect, reportProblems);
+        PlaceOverlayPiece(
+            recognitionMouthImage, mouthStyles, mouthStyle, Tracked(mouthPos), overlayMouthFraction,
+            previewRect, reportProblems);
 
-        PlaceOverlayPiece(recognitionEyeImage, eyeStyles, eyeStyle, eyePos, overlayEyeFraction, previewRect);
-        PlaceOverlayPiece(recognitionMouthImage, mouthStyles, mouthStyle, mouthPos, overlayMouthFraction, previewRect);
+        _facePlacedAt = _faceTrackedCurrent;
+    }
+
+    /// <summary>
+    /// Shifts one registered piece by the tracked offset. Clamped because a piece outside the
+    /// preview would otherwise trip the "never placed" sentinel and hide itself.
+    /// </summary>
+    private Vector2 Tracked(Vector2 registered)
+    {
+        var (x, y) = FaceOverlayTracking.TrackedPosition(
+            registered.x, registered.y, _faceTrackedCurrent.x, _faceTrackedCurrent.y);
+
+        return new Vector2(Mathf.Clamp01(x), Mathf.Clamp01(y));
     }
 
     private static bool IsPlaced(Vector2 relative) => relative.x >= 0f && relative.y >= 0f;
 
     private static void PlaceOverlayPiece(Image image, List<Sprite> styles, int styleId,
-        Vector2 relative, float fraction, Rect previewRect)
+        Vector2 relative, float fraction, Rect previewRect, bool reportProblems)
     {
         if (image == null)
         {
@@ -1239,10 +1459,14 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
                          && previewRect.width > 0f && previewRect.height > 0f;
         if (!placeable)
         {
-            Debug.LogWarning($"[FaceDiag] PlaceOverlayPiece not placeable: styleId={styleId}, "
-                + $"styles={(styles == null ? "NULL" : styles.Count.ToString())}, "
-                + $"styleOk={(styles != null && styleId >= 0 && styleId < styles.Count && styles[styleId] != null)}, "
-                + $"relative={relative}, rect={previewRect.width}x{previewRect.height}.");
+            if (reportProblems)
+            {
+                Debug.LogWarning($"[FaceDiag] PlaceOverlayPiece not placeable: styleId={styleId}, "
+                    + $"styles={(styles == null ? "NULL" : styles.Count.ToString())}, "
+                    + $"styleOk={(styles != null && styleId >= 0 && styleId < styles.Count && styles[styleId] != null)}, "
+                    + $"relative={relative}, rect={previewRect.width}x{previewRect.height}.");
+            }
+
             image.gameObject.SetActive(false);
             return;
         }
@@ -1265,6 +1489,10 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
 
     private void HideFaceOverlay()
     {
+        _faceOverlayObject = null;
+        _faceTrackedTarget = FrameCentre;
+        _faceTrackedCurrent = FrameCentre;
+        _facePlacedAt = FrameCentre;
         if (recognitionEyeImage != null) recognitionEyeImage.gameObject.SetActive(false);
         if (recognitionMouthImage != null) recognitionMouthImage.gameObject.SetActive(false);
     }
@@ -1290,9 +1518,83 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         if (placementPanel != null) placementPanel.SetActive(false);
         cropOverlayPlacement?.Hide();
 
+        // Only now is the preview's rect real. FitGraphicAspect above just set an
+        // AspectRatioFitter, which resizes on the next layout pass, and the panel was inactive
+        // until a moment ago - reading the rect before both is the stale-rect trap this file
+        // already warns about for the camera guides.
+        Canvas.ForceUpdateCanvases();
+        if (snapshotDisplay_Naming != null)
+        {
+            LayoutRebuilder.ForceRebuildLayoutImmediate(snapshotDisplay_Naming.rectTransform);
+        }
+
+        ShowPlacedFaceOnNamingPreview(crop);
+
         if (nameInputField != null) nameInputField.text = "";
         if (categoryInputField != null) categoryInputField.text = "";
         Debug.Log("Switched to Naming Mode.");
+    }
+
+    /// <summary>
+    /// Hides the naming preview's face. Placement turns these on and nothing else turns them off,
+    /// so every route out of the naming screen has to come through here.
+    /// </summary>
+    private void HideNamingFace()
+    {
+        if (namingEyeImage != null) namingEyeImage.gameObject.SetActive(false);
+        if (namingMouthImage != null) namingMouthImage.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Repeats the placed eye and mouth on the naming preview, so the user confirms the face they
+    /// actually made rather than a bare photo. The positions were recorded against the placement
+    /// screen, which showed the whole frame, while this preview shows only the centre square that
+    /// gets registered - hence the remap, without which the face lands well off the mark.
+    /// </summary>
+    private void ShowPlacedFaceOnNamingPreview(PixelRect crop)
+    {
+        if (snapshotDisplay_Naming == null || tempSnapshot == null)
+        {
+            return;
+        }
+
+        var normalized = ImageGeometry.NormalizedCenterCrop(
+            tempSnapshot.width, tempSnapshot.height, guideFractionOfPreview);
+        var previewRect = snapshotDisplay_Naming.rectTransform.rect;
+
+        PlaceNamingPiece(namingEyeImage, eyeStyles, currentEyeId, tempRelativeEyePos, overlayEyeFraction, normalized, previewRect);
+        PlaceNamingPiece(namingMouthImage, mouthStyles, currentMouthId, tempRelativeMouthPos, overlayMouthFraction, normalized, previewRect);
+    }
+
+    private static void PlaceNamingPiece(
+        Image image, List<Sprite> styles, int styleId, Vector2 relative, float fraction,
+        NormalizedRect crop, Rect previewRect)
+    {
+        if (image == null)
+        {
+            return;
+        }
+
+        var placeable = styleId >= 0 && styles != null && styleId < styles.Count && styles[styleId] != null
+                        && relative.x >= 0f && relative.y >= 0f
+                        && previewRect.width > 0f && previewRect.height > 0f;
+        if (!placeable)
+        {
+            image.gameObject.SetActive(false);
+            return;
+        }
+
+        var (x, y) = CropRemap.ToCropSpace(relative.x, relative.y, crop);
+        var (anchoredX, anchoredY) = FaceOverlayLayout.AnchoredPosition(x, y, previewRect.width, previewRect.height);
+
+        image.sprite = styles[styleId];
+        var rt = image.rectTransform;
+        rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
+        rt.anchoredPosition = new Vector2(anchoredX, anchoredY);
+        var side = Mathf.Min(previewRect.width, previewRect.height) * fraction;
+        rt.sizeDelta = new Vector2(side, side);
+        image.gameObject.SetActive(true);
     }
 
     private void SwitchToPlacementMode(Texture2D snapshot)
@@ -1589,6 +1891,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
             Debug.Log("Back button pressed on Naming panel. Returning to placement.");
             currentMode = AppMode.Placement;
             if (namingPanel != null) namingPanel.SetActive(false);
+            HideNamingFace();
             if (placementPanel != null) placementPanel.SetActive(true);
             ShowOverlay(cropOverlayPlacement);
             // Re-populate styles
@@ -1726,6 +2029,7 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         // --- Panel Transition ---
         Debug.Log("Registration successful. Returning to selection panel.");
         if (namingPanel != null) namingPanel.SetActive(false);
+        HideNamingFace();
         if (talkSelectionPanel != null) talkSelectionPanel.SetActive(true);
         if (objectMatcherRootPanel != null) objectMatcherRootPanel.SetActive(false); // Triggers OnDisable
         // --- End ---
@@ -1847,6 +2151,11 @@ public class EmbeddingObjectMatcher : MonoBehaviour, IRecognitionObservationSour
         {
             Debug.LogError($"Failed to load recognition samples: {e}");
             return;
+        }
+
+        if (localFeatureBackend == LocalFeatureBackend.Template)
+        {
+            SeedTemplatesFromSnapshots(userObjects);
         }
 
         Debug.Log($"Loaded {_objectsById.Count} objects, {_recognitionService.RegisteredObjectCount} recognizable.");
