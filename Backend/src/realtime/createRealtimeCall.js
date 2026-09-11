@@ -10,6 +10,9 @@ export function createOpenAIRealtimeCall({ apiKey, model, voice, tools = [], fet
       instructions,
       audio: {
         input: {
+          // Hints the input transcription toward Japanese so a mumbled or noisy utterance isn't
+          // mis-transcribed as English, which otherwise makes the model reply in English too.
+          transcription: { language: 'ja' },
           // Raised thresholds because the client has no acoustic echo cancellation: the assistant's
           // own voice, played through the device speaker, leaks back into the microphone. A higher
           // detection threshold ignores that attenuated leakage, and a longer required silence keeps
