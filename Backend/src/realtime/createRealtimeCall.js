@@ -12,7 +12,9 @@ export function createOpenAIRealtimeCall({ apiKey, model, voice, tools = [], fet
         input: {
           // Hints the input transcription toward Japanese so a mumbled or noisy utterance isn't
           // mis-transcribed as English, which otherwise makes the model reply in English too.
-          transcription: { language: 'ja' },
+          // `model` is required by the Realtime API whenever `transcription` is present at all -
+          // omitting it makes every session.create call fail with a 400 missing_required_parameter.
+          transcription: { model: 'whisper-1', language: 'ja' },
           // Raised thresholds because the client has no acoustic echo cancellation: the assistant's
           // own voice, played through the device speaker, leaks back into the microphone. A higher
           // detection threshold ignores that attenuated leakage, and a longer required silence keeps
