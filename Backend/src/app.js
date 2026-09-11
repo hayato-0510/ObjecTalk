@@ -2,7 +2,6 @@ import express from 'express';
 import { extractBearerToken } from './auth/firebaseAuth.js';
 import { buildInstructions } from './conversation/buildInstructions.js';
 import { selectVoice } from './conversation/selectVoice.js';
-import { createInMemoryLimiter } from './rateLimit/inMemoryLimiter.js';
 import { createDailyBudget } from './rateLimit/dailyBudget.js';
 
 const MAX_SDP_LENGTH = 200_000;
@@ -12,7 +11,10 @@ export function createApp({
   createRealtimeCall,
   voicePools,
   invokeTool,
-  limiter = createInMemoryLimiter(),
+  // Per-user request-count limiting is disabled by default: the client's own retry loop can
+  // legitimately fire many requests in a short window while a single conversation-start attempt
+  // is failing, and that shouldn't lock a visitor out. Pass a real limiter in to re-enable it.
+  limiter = () => true,
   dailyBudget = createDailyBudget(),
 }) {
   if (typeof verifyIdToken !== 'function' || typeof createRealtimeCall !== 'function') {
