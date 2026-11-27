@@ -5,6 +5,16 @@ voice conversation "as" that object. Recognition runs on-device (an embedding mo
 optional local feature verification); the conversation runs through the OpenAI Realtime
 API, brokered by a small backend that never exposes the API key.
 
+## 概要（日本語）
+
+ObjecTalk は、Android スマホを登録したモノに向けると、そのモノになりきって音声で会話できるアプリです。
+
+- **物体認識は端末上で実行**します（埋め込みモデル＋局所特徴による照合）。カメラに映ったモノが、登録済みのどれかを判定します
+- **会話は OpenAI Realtime API** で行います。接続は自前のバックエンドが中継し、API キーをクライアントに渡しません
+- モノごとに人格（口調や設定）を持たせることができ、天気や Web 検索などのツールも使えます
+
+構成は Unity クライアント（Android）と Node.js / Express のバックエンドです。バックエンドは Firebase 認証の検証、会話の指示文の生成、Realtime 接続の仲介、日次予算によるレート制限を担います。
+
 ## Repository layout
 
 | Path | What |
