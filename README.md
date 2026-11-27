@@ -15,6 +15,28 @@ ObjecTalk は、Android スマホを登録したモノに向けると、その�
 
 構成は Unity クライアント（Android）と Node.js / Express のバックエンドです。バックエンドは Firebase 認証の検証、会話の指示文の生成、Realtime 接続の仲介、日次予算によるレート制限を担います。
 
+## 画面
+
+ログイン画面:
+
+![ログイン画面](docs/images/screen-login.png)
+
+ホーム画面（「はなす」「登録」）:
+
+![ホーム画面](docs/images/screen-home.png)
+
+登録したモノの一覧・検索画面:
+
+![登録モノ一覧](docs/images/screen-list.png)
+
+会話画面（認識したモノに目と口が付き、そのモノとして返事をします）:
+
+![会話画面](docs/images/screen-talk.png)
+
+実機で動かしている様子:
+
+![実機写真](docs/images/screen-device.jpg)
+
 ## 使い方の流れ
 
 1. **モノを登録する**: 会話したいモノを撮影して登録します。モノごとに人格（口調や設定）を持たせられます
